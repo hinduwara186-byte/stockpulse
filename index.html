@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>StockPulse — Realtime Stock & In/Out Manager</title>
+  <meta name="description" content="Simple, realtime stock count manager with live multi-device syncing between PC and Android.">
+  
+  <!-- PWA & Mobile Meta -->
+  <link rel="manifest" href="./manifest.json">
+  <meta name="theme-color" content="#090d16">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="StockPulse">
+  <link rel="icon" type="image/png" href="./favicon.png">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+
+  <!-- Modern Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Header -->
+    <header class="top-header">
+      <div class="brand-section">
+        <img src="./favicon.png" alt="StockPulse Logo" class="brand-icon">
+        <div>
+          <div class="brand-title">
+            StockPulse
+            <span class="brand-badge">Sync</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Desktop Nav -->
+      <nav class="desktop-nav" id="desktopNav">
+        <button class="nav-btn active" data-tab="inventory">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+          Stock List
+        </button>
+        <button class="nav-btn" data-tab="inout">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          In & Out
+        </button>
+        <button class="nav-btn" data-tab="settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Cloud Database
+        </button>
+      </nav>
+
+      <div class="header-actions">
+        <!-- Live Realtime Sync Status -->
+        <div class="sync-indicator" id="syncStatusBtn" title="Click to view database connection">
+          <span class="status-dot pulse" id="statusDot"></span>
+          <span id="syncStatusText">Connecting...</span>
+        </div>
+        
+        <!-- PWA Install Button -->
+        <button class="btn btn-secondary" id="installPwaBtn" style="display:none; padding:6px 12px; font-size:0.8rem;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Install App
+        </button>
+      </div>
+    </header>
+
+    <!-- Metrics Summary Strip (3 simple count indicators) -->
+    <section class="metrics-strip">
+      <div class="metric-card">
+        <div class="metric-icon-wrap icon-emerald">📦</div>
+        <div class="metric-info">
+          <span class="metric-label">Total Items</span>
+          <span class="metric-value" id="metricTotalSkus">0</span>
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon-wrap icon-cyan">🔢</div>
+        <div class="metric-info">
+          <span class="metric-label">Total Units in Stock</span>
+          <span class="metric-value" id="metricTotalUnits">0</span>
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon-wrap icon-amber">⚠️</div>
+        <div class="metric-info">
+          <span class="metric-label">Low Stock (≤5)</span>
+          <span class="metric-value" id="metricLowStock">0</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      
+      <!-- 1. LIVE STOCK LIST VIEW -->
+      <section class="view-section active" id="view-inventory">
+        <div class="section-header">
+          <div>
+            <h1 class="section-title">Stock Count Management</h1>
+            <p class="section-desc">Manage stock counts in real time. Changes automatically sync between your PC and Android phone.</p>
+          </div>
+        </div>
+
+        <!-- Top Action Buttons for Shipment & Distribution -->
+        <div class="inout-top-action-bar">
+          <button class="btn btn-primary btn-action-big js-open-shipment">
+            <span style="font-size:1.6rem;">📥</span>
+            <div style="text-align:left;">
+              <div style="font-size:1.15rem; font-weight:800;">Add Shipment</div>
+              <div style="font-size:0.78rem; opacity:0.85;">Receive incoming items into stock</div>
+            </div>
+          </button>
+          <button class="btn btn-sale btn-action-big js-open-distribution" style="background:linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+            <span style="font-size:1.6rem;">📤</span>
+            <div style="text-align:left;">
+              <div style="font-size:1.15rem; font-weight:800;">Out for Distribution</div>
+              <div style="font-size:0.78rem; opacity:0.85;">Dispatch items from stock</div>
+            </div>
+          </button>
+        </div>
+
+        <!-- Direct Add Item Form -->
+        <div class="quick-add-panel">
+          <div class="quick-add-header">
+            <h3>Add New Item</h3>
+            <span class="quick-add-subtitle">Enter item name and initial count to add it directly to your list.</span>
+          </div>
+          <form id="directAddItemForm" class="direct-add-form">
+            <div class="add-form-fields">
+              <div class="field-item flex-2">
+                <label>Item Name *</label>
+                <input type="text" id="directItemName" placeholder="e.g. Basmati Rice 5kg, Cooking Oil 1L" required autocomplete="off">
+              </div>
+              <div class="field-item flex-1">
+                <label>Initial Stock Count *</label>
+                <input type="number" id="directItemStock" min="0" value="10" required>
+              </div>
+              <div class="field-item btn-field">
+                <button type="submit" class="btn btn-primary" style="height: 42px; width: 100%;">
+                  + Add Item
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <!-- Search Bar -->
+        <div class="inventory-toolbar">
+          <div class="search-box">
+            <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input type="text" id="inventorySearch" class="search-input" placeholder="Search items by name...">
+          </div>
+        </div>
+
+        <!-- Clean, Simplified List View -->
+        <div class="inventory-list-wrapper">
+          <div class="list-header-row">
+            <div class="col-item">Item Name</div>
+            <div class="col-stock">Current Stock Count</div>
+            <div class="col-actions">Quick Update</div>
+          </div>
+          <div class="inventory-list" id="inventoryList">
+            <!-- Dynamically populated list rows -->
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. IN & OUT PAGE (SHIPMENT ARRIVAL & DISTRIBUTION OUT) -->
+      <section class="view-section" id="view-inout">
+        <div class="section-header">
+          <div>
+            <h1 class="section-title">In & Out (Shipments & Distribution)</h1>
+            <p class="section-desc">Add stock when shipments arrive, and deduct stock when dispatched for distribution.</p>
+          </div>
+        </div>
+
+        <!-- Top Action Buttons for In & Out -->
+        <div class="inout-top-action-bar">
+          <button class="btn btn-primary btn-action-big js-open-shipment" id="openShipmentBatchBtn">
+            <span style="font-size:1.6rem;">📥</span>
+            <div style="text-align:left;">
+              <div style="font-size:1.15rem; font-weight:800;">Add Shipment</div>
+              <div style="font-size:0.78rem; opacity:0.85;">Receive incoming items into stock</div>
+            </div>
+          </button>
+          <button class="btn btn-sale btn-action-big js-open-distribution" id="openDistributionBatchBtn" style="background:linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+            <span style="font-size:1.6rem;">📤</span>
+            <div style="text-align:left;">
+              <div style="font-size:1.15rem; font-weight:800;">Out for Distribution</div>
+              <div style="font-size:0.78rem; opacity:0.85;">Dispatch items from stock</div>
+            </div>
+          </button>
+        </div>
+
+        <!-- Live Stock Items on In & Out Page (Same items as first page) -->
+        <div style="margin-bottom: 24px;">
+          <h3 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 12px; display:flex; align-items:center; gap:8px;">
+            <span>📦</span> Current Items & Stock Levels
+          </h3>
+          <div class="inventory-list-wrapper">
+            <div class="list-header-row">
+              <div class="col-item">Item Name</div>
+              <div class="col-stock">Current Stock Count</div>
+              <div class="col-actions">Quick In / Out</div>
+            </div>
+            <div class="inventory-list" id="inoutItemList">
+              <!-- Dynamically populated same list -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent In & Out Movements Activity Feed -->
+        <div>
+          <h3 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 12px; display:flex; align-items:center; gap:8px;">
+            <span>📜</span> Recent In & Out Activity Log
+          </h3>
+          <div class="table-container">
+            <table class="ledger-table">
+              <thead>
+                <tr>
+                  <th>Date & Time</th>
+                  <th>Action</th>
+                  <th>Item</th>
+                  <th>Quantity Changed</th>
+                  <th>Note / Details</th>
+                </tr>
+              </thead>
+              <tbody id="inoutActivityTableBody">
+                <!-- Dynamically populated recent in/out entries -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. DATABASE SETTINGS & FREE SUPABASE SETUP VIEW -->
+      <section class="view-section" id="view-settings">
+        <div class="section-header">
+          <div>
+            <h1 class="section-title">Online Database Sync (Supabase)</h1>
+            <p class="section-desc">Connect your free Supabase PostgreSQL cloud database to sync counts between PC and phone.</p>
+          </div>
+        </div>
+
+        <div class="action-panel-grid">
+          <div class="action-card">
+            <h3 style="font-size: 1.15rem; margin-bottom: 16px; color: var(--accent-emerald);">Supabase API Credentials</h3>
+            
+            <form id="supabaseConfigForm">
+              <div class="form-group">
+                <label class="form-label">Project URL</label>
+                <input type="text" id="supabaseUrlInput" class="form-control" placeholder="https://your-project.supabase.co" autocomplete="off">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Anon / Public API Key</label>
+                <input type="password" id="supabaseKeyInput" class="form-control" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." autocomplete="off">
+              </div>
+
+              <div style="display:flex; gap: 10px; margin-top: 18px;">
+                <button type="submit" class="btn btn-primary" style="flex:1;">
+                  Save & Connect Live
+                </button>
+                <button type="button" class="btn btn-secondary" id="useDemoModeBtn">
+                  Use Local Sync Demo
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div class="action-card">
+            <h3 style="font-size: 1.15rem; margin-bottom: 12px; color: var(--accent-cyan);">🚀 Free 1-Click Setup Instructions</h3>
+            <ol style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.8; padding-left: 20px;">
+              <li>Create a free account at <a href="https://supabase.com" target="_blank" style="color:var(--accent-emerald); font-weight:600;">supabase.com</a>.</li>
+              <li>Open your project's <strong>SQL Editor</strong>.</li>
+              <li>Click the button below to copy the SQL script, paste it into the editor, and click <strong>Run</strong>.</li>
+              <li>Copy your <strong>URL</strong> and <strong>anon key</strong> from <strong>Project Settings &rarr; API</strong>.</li>
+            </ol>
+            
+            <button class="btn btn-secondary" id="copySqlBtn" style="width: 100%; margin-top: 16px;">
+              📋 Copy Turnkey SQL Schema
+            </button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Mobile Bottom Tab Bar -->
+    <nav class="mobile-nav-bar" id="mobileNavBar">
+      <button class="mobile-nav-item active" data-tab="inventory">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+        <span>Stock</span>
+      </button>
+      <button class="mobile-nav-item" data-tab="inout">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        <span>In & Out</span>
+      </button>
+      <button class="mobile-nav-item" data-tab="settings">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Cloud</span>
+      </button>
+    </nav>
+
+    <!-- Quantity Adjustment Modal (For Shipment or Sale) -->
+    <div class="modal-overlay" id="adjustStockModal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title" id="adjustModalTitle">Update Stock</div>
+          <button class="modal-close" id="closeAdjustModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p id="adjustModalSubtitle" style="font-size:0.9rem; color:var(--text-secondary); margin-bottom:16px;">
+            Item: <strong id="adjustItemName" style="color:var(--text-primary);"></strong>
+          </p>
+          <form id="adjustStockForm">
+            <div class="form-group">
+              <label class="form-label" id="adjustQtyLabel">Quantity to Add/Remove</label>
+              <input type="number" id="adjustQtyInput" class="form-control" min="1" value="1" required>
+              <div class="quick-qty-group" style="margin-top:10px;">
+                <button type="button" class="quick-qty-btn" onclick="document.getElementById('adjustQtyInput').value = 1">+1</button>
+                <button type="button" class="quick-qty-btn" onclick="document.getElementById('adjustQtyInput').value = 5">+5</button>
+                <button type="button" class="quick-qty-btn" onclick="document.getElementById('adjustQtyInput').value = 10">+10</button>
+                <button type="button" class="quick-qty-btn" onclick="document.getElementById('adjustQtyInput').value = 50">+50</button>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary" id="adjustConfirmBtn" style="width:100%; margin-top:16px; padding:12px;">
+              Confirm Update
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Batch In & Out Popup Window Modal -->
+    <div class="modal-overlay" id="batchInOutModal">
+      <div class="modal-card batch-modal">
+        <div class="modal-header">
+          <div>
+            <div class="modal-title" id="batchModalTitle">Add Shipment</div>
+            <div id="batchModalSubtitle" style="font-size:0.8rem; color:var(--text-secondary); margin-top:3px;">
+              Adjust quantities using + and - icons or type directly in the box, then save to update database.
+            </div>
+          </div>
+          <button class="modal-close" id="closeBatchModal">&times;</button>
+        </div>
+        
+        <div style="padding: 14px 20px 0 20px; display:flex; flex-direction:column; gap:10px;">
+          <input type="text" id="batchModalSearch" class="form-control" placeholder="🔍 Filter items in this list..." style="font-size:0.88rem;">
+          <input type="text" id="batchModalNote" class="form-control" placeholder="Optional reference note (e.g. Supplier Batch #401 / Distribution Store #2)" style="font-size:0.88rem;">
+        </div>
+
+        <div class="batch-modal-body" id="batchModalItemsList">
+          <!-- Dynamically populated list of items with typable input, + and - buttons -->
+        </div>
+
+        <div class="batch-modal-footer">
+          <div style="font-size:0.88rem; color:var(--text-secondary);">
+            Items with values to update: <strong id="batchTotalCount" style="color:var(--accent-emerald); font-family:var(--font-mono); font-size:1.05rem;">0</strong>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <button type="button" class="btn btn-secondary" id="resetBatchInputsBtn" style="padding:9px 14px; font-size:0.85rem;">
+              Reset to 0
+            </button>
+            <button type="button" class="btn btn-primary" id="saveBatchUpdateBtn" style="padding:10px 22px;">
+              💾 Save & Update Database
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div class="toast-container" id="toastContainer"></div>
+  </div>
+
+  <!-- Main Logic Module -->
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
