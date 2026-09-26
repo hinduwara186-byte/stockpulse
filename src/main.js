@@ -98,49 +98,41 @@ function setupBroadcastChannel() {
   }
 }
 
-// ── Supabase Init ──────────────────────────────────────────────────────────────
-const envSupabaseUrl = import.meta.env?.VITE_SUPABASE_URL || '';
-const envSupabaseKey = import.meta.env?.VITE_SUPABASE_ANON_KEY || '';
+// ── Supabase Permanent Configuration ───────────────────────────────────────────
+const SUPABASE_URL = 'https://euxupebzsfiqnlmbpxri.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1eHVwZWJ6c2ZpcW5sbWJweHJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzODc3NzQsImV4cCI6MjEwNTk2Mzc3NH0.XFBLXMfo748oKIBd6F2KJ1FlRtrMXByrowaC4likncY';
 
 async function initSupabaseClient() {
-  const storedUrl = localStorage.getItem('stockpulse_supabase_url') || envSupabaseUrl;
-  const storedKey = localStorage.getItem('stockpulse_supabase_key') || envSupabaseKey;
-
   const statusDot  = document.getElementById('statusDot');
   const statusText = document.getElementById('syncStatusText');
 
-  if (storedUrl && storedKey) {
-    try {
-      supabase = createClient(storedUrl, storedKey);
-      const { data, error } = await supabase.from('products').select('*').limit(1);
-      if (error) throw error;
+  try {
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const { data, error } = await supabase.from('products').select('*').limit(1);
+    if (error) throw error;
 
-      isLiveSupabase = true;
-      statusDot.className  = 'status-dot pulse';
-      statusText.textContent = 'Supabase Cloud Live 🟢';
-      showToast('Connected to Supabase Cloud Database!', 'success');
+    isLiveSupabase = true;
+    if (statusDot) statusDot.className  = 'status-dot pulse';
+    if (statusText) statusText.textContent = 'Supabase Cloud Live 🟢';
 
-      await fetchRemoteProducts();
-      await fetchRemoteMovements();
+    await fetchRemoteProducts();
+    await fetchRemoteMovements();
 
-      supabase
-        .channel('public:realtime-products-and-tx')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'products' },     handleRemoteProductChange)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, handleRemoteTransactionChange)
-        .subscribe((status) => console.log('[Supabase Realtime]:', status));
+    supabase
+      .channel('public:realtime-products-and-tx')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' },     handleRemoteProductChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, handleRemoteTransactionChange)
+      .subscribe((status) => console.log('[Supabase Realtime]:', status));
 
-      return;
-    } catch (err) {
-      console.warn('Supabase connect failed, falling back to demo mode:', err);
-      showToast('Could not connect to Supabase: ' + err.message, 'danger');
-    }
+    return;
+  } catch (err) {
+    console.warn('Supabase connection fallback to local storage:', err);
+    isLiveSupabase = false;
+    if (statusDot) statusDot.className  = 'status-dot demo';
+    if (statusText) statusText.textContent = 'Demo Mode 🟡';
+    loadDataFromStorage();
+    renderAll();
   }
-
-  isLiveSupabase = false;
-  statusDot.className  = 'status-dot demo';
-  statusText.textContent = 'Demo Mode (Sync Ready) 🟡';
-  loadDataFromStorage();
-  renderAll();
 }
 
 async function fetchRemoteProducts() {
@@ -826,43 +818,6 @@ document.querySelectorAll('[data-tab]').forEach(btn => {
   btn.addEventListener('click', () => switchTab(btn.getAttribute('data-tab')));
 });
 
-// ── Settings & Supabase ────────────────────────────────────────────────────────
-const urlInput = document.getElementById('supabaseUrlInput');
-const keyInput = document.getElementById('supabaseKeyInput');
-
-if (urlInput) urlInput.value = localStorage.getItem('stockpulse_supabase_url') || envSupabaseUrl || '';
-if (keyInput) keyInput.value = localStorage.getItem('stockpulse_supabase_key') || envSupabaseKey || '';
-
-document.getElementById('supabaseConfigForm')?.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const url = urlInput?.value.trim();
-  const key = keyInput?.value.trim();
-  if (!url || !key) { showToast('Please enter both Supabase URL and Anon Key.', 'danger'); return; }
-  localStorage.setItem('stockpulse_supabase_url', url);
-  localStorage.setItem('stockpulse_supabase_key', key);
-  showToast('Connecting to your Supabase project...', 'info');
-  await initSupabaseClient();
-});
-
-document.getElementById('useDemoModeBtn')?.addEventListener('click', () => {
-  localStorage.removeItem('stockpulse_supabase_url');
-  localStorage.removeItem('stockpulse_supabase_key');
-  if (urlInput) urlInput.value = '';
-  if (keyInput) keyInput.value = '';
-  initSupabaseClient();
-  showToast('Switched to Local & Multi-window Sync mode.', 'info');
-});
-
-document.getElementById('copySqlBtn')?.addEventListener('click', async () => {
-  try {
-    const res = await fetch('/supabase_schema.sql');
-    const sql = await res.text();
-    await navigator.clipboard.writeText(sql);
-    showToast('Copied turnkey SQL schema to clipboard!', 'success');
-  } catch (_) {
-    showToast('Open supabase_schema.sql in the project to copy manually.', 'danger');
-  }
-});
 
 // ── PWA: Service Worker & Install Button ───────────────────────────────────────
 let deferredPrompt = null;

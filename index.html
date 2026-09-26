@@ -236,59 +236,7 @@
           </div>
         </div>
       </section>
-
-      <!-- 3. DATABASE SETTINGS & FREE SUPABASE SETUP VIEW -->
-      <section class="view-section" id="view-settings">
-        <div class="section-header">
-          <div>
-            <h1 class="section-title">Online Database Sync (Supabase)</h1>
-            <p class="section-desc">Connect your free Supabase PostgreSQL cloud database to sync counts between PC and phone.</p>
-          </div>
-        </div>
-
-        <div class="action-panel-grid">
-          <div class="action-card">
-            <h3 style="font-size: 1.15rem; margin-bottom: 16px; color: var(--accent-emerald);">Supabase API Credentials</h3>
-            
-            <form id="supabaseConfigForm">
-              <div class="form-group">
-                <label class="form-label">Project URL</label>
-                <input type="text" id="supabaseUrlInput" class="form-control" placeholder="https://your-project.supabase.co" autocomplete="off">
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">Anon / Public API Key</label>
-                <input type="password" id="supabaseKeyInput" class="form-control" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." autocomplete="off">
-              </div>
-
-              <div style="display:flex; gap: 10px; margin-top: 18px;">
-                <button type="submit" class="btn btn-primary" style="flex:1;">
-                  Save & Connect Live
-                </button>
-                <button type="button" class="btn btn-secondary" id="useDemoModeBtn">
-                  Use Local Sync Demo
-                </button>
-              </div>
-            </form>
-          </div>
-
-          <div class="action-card">
-            <h3 style="font-size: 1.15rem; margin-bottom: 12px; color: var(--accent-cyan);">🚀 Free 1-Click Setup Instructions</h3>
-            <ol style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.8; padding-left: 20px;">
-              <li>Create a free account at <a href="https://supabase.com" target="_blank" style="color:var(--accent-emerald); font-weight:600;">supabase.com</a>.</li>
-              <li>Open your project's <strong>SQL Editor</strong>.</li>
-              <li>Click the button below to copy the SQL script, paste it into the editor, and click <strong>Run</strong>.</li>
-              <li>Copy your <strong>URL</strong> and <strong>anon key</strong> from <strong>Project Settings &rarr; API</strong>.</li>
-            </ol>
-            
-            <button class="btn btn-secondary" id="copySqlBtn" style="width: 100%; margin-top: 16px;">
-              📋 Copy Turnkey SQL Schema
-            </button>
-          </div>
-        </div>
-      </section>
-
-    </main>
+</main>
 
     <!-- Mobile Bottom Tab Bar -->
     <nav class="mobile-nav-bar" id="mobileNavBar">
