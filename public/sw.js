@@ -1,15 +1,7 @@
-// StockPulse Service Worker
-const CACHE_NAME = 'stockpulse-cache-v1';
-const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json'
-];
+// StockPulse Service Worker v2 - Progressive Web App
+const CACHE_NAME = 'stockpulse-pwa-v2';
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS_TO_CACHE))
-  );
   self.skipWaiting();
 });
 
@@ -27,11 +19,25 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Network first, fallback to cache for offline resilience
   if (event.request.method !== 'GET') return;
+
+  const url = new URL(event.request.url);
+
+  // Skip caching external Supabase API / WebSocket requests
+  if (url.origin.includes('supabase.co')) {
+    return;
+  }
+
+  // Network-first with cache fallback
   event.respondWith(
     fetch(event.request)
       .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+        }
         return networkResponse;
       })
       .catch(() => caches.match(event.request))

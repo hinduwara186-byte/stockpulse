@@ -1,22 +1,38 @@
 {
-  "name": "StockPulse - Realtime Inventory & Sales",
+  "name": "StockPulse - Realtime Stock Manager",
   "short_name": "StockPulse",
-  "description": "Real-time multi-device inventory management with live Supabase sync and camera barcode scanner.",
-  "start_url": "/",
+  "description": "Real-time stock count manager with live multi-device syncing.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#0b0f19",
-  "theme_color": "#10b981",
+  "background_color": "#090d16",
+  "theme_color": "#090d16",
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "icon-192.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "any"
     },
     {
-      "src": "/icon-512.png",
+      "src": "icon-192.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "192x192",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
     }
   ]
 }

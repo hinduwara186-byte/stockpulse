@@ -841,8 +841,12 @@ installBtn?.addEventListener('click', async () => {
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').then(
-      (reg) => console.log('[PWA SW] Registered:', reg.scope),
+    const swUrl = new URL('sw.js', window.location.href).href;
+    navigator.serviceWorker.register(swUrl).then(
+      (reg) => {
+        console.log('[PWA SW] Registered:', reg.scope);
+        reg.update();
+      },
       (err) => console.log('[PWA SW] Registration failed:', err)
     );
   });
