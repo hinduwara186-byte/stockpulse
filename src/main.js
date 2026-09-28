@@ -819,35 +819,70 @@ document.querySelectorAll('[data-tab]').forEach(btn => {
 });
 
 
-// ── PWA: Service Worker & Install Button ───────────────────────────────────────
+// ── PWA: Service Worker & Install Prompt ────────────────────────────────────────
 let deferredPrompt = null;
-const installBtn   = document.getElementById('installPwaBtn');
+const installBtn = document.getElementById('installPwaBtn');
+const pwaBanner = document.getElementById('pwaInstallBanner');
+const bannerInstallBtn = document.getElementById('bannerInstallBtn');
+const bannerDismissBtn = document.getElementById('bannerDismissBtn');
+
+function showInstallUi() {
+  if (installBtn) installBtn.style.display = 'inline-flex';
+  if (pwaBanner && !sessionStorage.getItem('pwa_banner_dismissed')) {
+    pwaBanner.style.display = 'flex';
+  }
+}
 
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
-  if (installBtn) installBtn.style.display = 'inline-flex';
+  showInstallUi();
 });
 
-installBtn?.addEventListener('click', async () => {
+async function triggerInstallPrompt() {
   if (deferredPrompt) {
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') showToast('App installed successfully!', 'success');
+    if (outcome === 'accepted') {
+      showToast('StockPulse installed successfully!', 'success');
+    }
     deferredPrompt = null;
-    installBtn.style.display = 'none';
+    if (installBtn) installBtn.style.display = 'none';
+    if (pwaBanner) pwaBanner.style.display = 'none';
   }
+}
+
+installBtn?.addEventListener('click', triggerInstallPrompt);
+bannerInstallBtn?.addEventListener('click', triggerInstallPrompt);
+bannerDismissBtn?.addEventListener('click', () => {
+  if (pwaBanner) pwaBanner.style.display = 'none';
+  sessionStorage.setItem('pwa_banner_dismissed', '1');
 });
 
+window.addEventListener('appinstalled', () => {
+  deferredPrompt = null;
+  if (installBtn) installBtn.style.display = 'none';
+  if (pwaBanner) pwaBanner.style.display = 'none';
+  showToast('StockPulse is installed and available on your home screen!', 'success');
+});
+
+// Robust Service Worker registration resolving correct repository scope
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    const swUrl = new URL('sw.js', window.location.href).href;
-    navigator.serviceWorker.register(swUrl).then(
+    let basePath = window.location.pathname;
+    if (basePath.endsWith('index.html')) {
+      basePath = basePath.slice(0, -'index.html'.length);
+    }
+    if (!basePath.endsWith('/')) {
+      basePath += '/';
+    }
+    const swUrl = `${window.location.origin}${basePath}sw.js`;
+    navigator.serviceWorker.register(swUrl, { scope: basePath }).then(
       (reg) => {
-        console.log('[PWA SW] Registered:', reg.scope);
+        console.log('[PWA SW] Registered with scope:', reg.scope);
         reg.update();
       },
-      (err) => console.log('[PWA SW] Registration failed:', err)
+      (err) => console.warn('[PWA SW] Registration failed:', err)
     );
   });
 }

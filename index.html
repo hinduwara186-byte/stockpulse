@@ -7,7 +7,7 @@
   <meta name="description" content="Simple, realtime stock count manager with live multi-device syncing between PC and Android.">
   
   <!-- PWA & Mobile Meta -->
-  <link rel="manifest" href="./manifest.json">
+  <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#090d16">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,6 +15,8 @@
   <meta name="apple-mobile-web-app-title" content="StockPulse">
   <link rel="icon" type="image/png" href="./favicon.png">
   <link rel="apple-touch-icon" href="./icon-192.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="./icon-192.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="./icon-512.png">
 
   <!-- Modern Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -25,6 +27,21 @@
 </head>
 <body>
   <div class="app-container">
+    <!-- PWA Install Prompt Banner -->
+    <div id="pwaInstallBanner" class="pwa-install-banner" style="display:none;">
+      <div class="pwa-banner-info">
+        <img src="./favicon.png" alt="StockPulse" class="pwa-banner-icon">
+        <div>
+          <div class="pwa-banner-title">Install StockPulse App</div>
+          <div class="pwa-banner-subtitle">Fast offline access & home screen shortcut</div>
+        </div>
+      </div>
+      <div class="pwa-banner-actions">
+        <button class="btn btn-primary" id="bannerInstallBtn">Install</button>
+        <button class="btn-close-banner" id="bannerDismissBtn" aria-label="Dismiss">&times;</button>
+      </div>
+    </div>
+
     <!-- Top Header -->
     <header class="top-header">
       <div class="brand-section">
