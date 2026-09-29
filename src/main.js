@@ -322,7 +322,7 @@ function renderProducts() {
     return `
       <div class="inventory-list-row" id="prod-row-${p.id}">
         <div class="col-item">
-          <button type="button" class="item-title-btn" onclick="window.openItemHistory('${p.id}')" title="Click to view In & Out history">
+          <button type="button" class="item-title-btn" data-history-id="${p.id}" onclick="window.openItemHistory('${p.id}')" title="Click to view In & Out history">
             <span>${escapeHtml(p.name)}</span>
             <span class="item-history-tag">📜 History</span>
           </button>
@@ -372,7 +372,7 @@ function renderInOutList() {
     return `
       <div class="inventory-list-row" id="inout-row-${p.id}">
         <div class="col-item">
-          <button type="button" class="item-title-btn" onclick="window.openItemHistory('${p.id}')" title="Click to view In & Out history">
+          <button type="button" class="item-title-btn" data-history-id="${p.id}" onclick="window.openItemHistory('${p.id}')" title="Click to view In & Out history">
             <span>${escapeHtml(p.name)}</span>
             <span class="item-history-tag">📜 History</span>
           </button>
@@ -1027,7 +1027,7 @@ function renderRecordsPage() {
       .join('<span style="color:var(--text-muted); margin:0 6px;">•</span>');
 
     return `
-      <div class="record-row" onclick="window.openInvoiceDetails('${escapeHtml(r.key)}')" title="Click to view full invoice breakdown">
+      <div class="record-row" data-invoice-key="${escapeHtml(r.key)}" onclick="window.openInvoiceDetails('${escapeHtml(r.key)}')" title="Click to view full invoice breakdown">
         <div>
           <span class="invoice-pill">
             <span>🧾</span>
@@ -1049,7 +1049,7 @@ function renderRecordsPage() {
           </div>
         </div>
         <div style="text-align:right;">
-          <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.8rem; pointer-events:none;">
+          <button type="button" class="btn btn-secondary view-invoice-btn" onclick="event.stopPropagation(); window.openInvoiceDetails('${escapeHtml(r.key)}')" style="padding:6px 14px; font-size:0.82rem; cursor:pointer;">
             View Details 👁️
           </button>
         </div>
@@ -1062,8 +1062,16 @@ document.getElementById('recordsSearch')?.addEventListener('input', debounce(ren
 
 // ── Invoice Details Modal ───────────────────────────────────────────────────────
 window.openInvoiceDetails = function(keyOrNum) {
+  if (!keyOrNum) return;
   const records = getInvoiceRecords();
-  const rec = records.find(r => r.key === keyOrNum || r.invoice_number === keyOrNum || r.raw_invoice === keyOrNum);
+  const searchKey = String(keyOrNum).toLowerCase().trim();
+  const rec = records.find(r => 
+    String(r.key).toLowerCase() === searchKey ||
+    String(r.invoice_number).toLowerCase() === searchKey ||
+    (r.raw_invoice && String(r.raw_invoice).toLowerCase() === searchKey) ||
+    `inv_${String(r.raw_invoice).toLowerCase()}` === searchKey
+  );
+
   if (!rec) {
     showToast('Invoice details not found', 'danger');
     return;
@@ -1079,7 +1087,7 @@ window.openInvoiceDetails = function(keyOrNum) {
   if (titleEl) titleEl.textContent = `Invoice #${rec.invoice_number}`;
   if (dateEl)  dateEl.textContent  = `Dispatched on ${formatDateTime(rec.created_at)}`;
 
-  if (rec.note) {
+  if (rec.note && rec.note !== '-') {
     noteBox.style.display = 'block';
     noteEl.textContent = rec.note;
   } else {
@@ -1087,7 +1095,7 @@ window.openInvoiceDetails = function(keyOrNum) {
   }
 
   tbody.innerHTML = rec.items.map(i => {
-    const prod = products.find(p => p.id === i.product_id || p.name === i.product_name);
+    const prod = products.find(p => String(p.id) === String(i.product_id) || p.name === i.product_name);
     const remainingStock = prod ? (Number(prod.stock_quantity) || 0) : '-';
 
     return `
@@ -1103,7 +1111,10 @@ window.openInvoiceDetails = function(keyOrNum) {
   }).join('');
 
   if (totalEl) totalEl.textContent = rec.total_units;
-  document.getElementById('invoiceDetailsModal')?.classList.add('active');
+  const modal = document.getElementById('invoiceDetailsModal');
+  if (modal) {
+    modal.classList.add('active');
+  }
 };
 
 document.getElementById('closeInvoiceDetailsModal')?.addEventListener('click', () => {
@@ -1118,10 +1129,14 @@ document.getElementById('invoiceDetailsModal')?.addEventListener('click', (e) =>
 
 // ── Item In & Out History Modal ────────────────────────────────────────────────
 window.openItemHistory = function(productId) {
-  const prod = products.find(p => p.id === productId);
-  if (!prod) return;
+  if (!productId) return;
+  const prod = products.find(p => String(p.id) === String(productId));
+  if (!prod) {
+    showToast('Product not found', 'danger');
+    return;
+  }
 
-  const itemMovements = movements.filter(m => m.product_id === prod.id || m.product_name === prod.name);
+  const itemMovements = movements.filter(m => String(m.product_id) === String(prod.id) || m.product_name === prod.name);
 
   const titleEl = document.getElementById('itemHistoryTitle');
   const subEl   = document.getElementById('itemHistorySubtitle');
@@ -1194,6 +1209,33 @@ document.getElementById('closeItemHistoryBtn')?.addEventListener('click', () => 
 });
 document.getElementById('itemHistoryModal')?.addEventListener('click', (e) => {
   if (e.target.id === 'itemHistoryModal') e.target.classList.remove('active');
+});
+
+// Event delegation for opening Item History and Invoice Details modals
+['inventoryList', 'inoutItemList'].forEach(containerId => {
+  document.getElementById(containerId)?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.item-title-btn');
+    if (btn) {
+      const id = btn.getAttribute('data-history-id');
+      if (id) {
+        e.preventDefault();
+        window.openItemHistory(id);
+      }
+    }
+  });
+});
+
+document.getElementById('recordsList')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.view-invoice-btn');
+  const row = e.target.closest('.record-row');
+  const target = btn || row;
+  if (target) {
+    const key = target.getAttribute('data-invoice-key') || row?.getAttribute('data-invoice-key');
+    if (key) {
+      e.preventDefault();
+      window.openInvoiceDetails(key);
+    }
+  }
 });
 
 
