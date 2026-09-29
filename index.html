@@ -64,6 +64,10 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
           In & Out
         </button>
+        <button class="nav-btn" data-tab="records">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          Records
+        </button>
       </nav>
 
       <div class="header-actions">
@@ -249,6 +253,67 @@
           </div>
         </div>
       </section>
+
+      <!-- 3. RECORDS PAGE (INVOICE ARCHIVE & DISPATCH HISTORY) -->
+      <section class="view-section" id="view-records">
+        <div class="section-header">
+          <div>
+            <h1 class="section-title">Invoice Records & Dispatches</h1>
+            <p class="section-desc">Search and view past stock dispatches organized by invoice number and date.</p>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <button class="btn btn-sale js-open-distribution" style="padding:10px 18px; font-size:0.9rem; background:linear-gradient(135deg, #f59e0b 0%, #d97706 100%); display:flex; align-items:center; gap:8px;">
+              <span>📤</span> Dispatch with Invoice
+            </button>
+          </div>
+        </div>
+
+        <!-- Records Quick Metrics -->
+        <div class="metrics-strip" style="margin-bottom:24px;">
+          <div class="metric-card">
+            <div class="metric-icon" style="background:rgba(245, 158, 11, 0.15); color:var(--accent-amber);">🧾</div>
+            <div>
+              <div class="metric-label">Total Invoices</div>
+              <div class="metric-value" id="recordsTotalInvoices">0</div>
+            </div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon" style="background:rgba(239, 68, 68, 0.15); color:var(--accent-rose);">📤</div>
+            <div>
+              <div class="metric-label">Total Units Dispatched</div>
+              <div class="metric-value" id="recordsTotalUnits">0</div>
+            </div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon" style="background:rgba(16, 185, 129, 0.15); color:var(--accent-emerald);">📦</div>
+            <div>
+              <div class="metric-label">Items Tracked</div>
+              <div class="metric-value" id="recordsActiveProducts">0</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Search Bar -->
+        <div style="margin-bottom: 20px;">
+          <div style="position:relative;">
+            <input type="text" id="recordsSearch" class="form-control" placeholder="🔍 Search invoice number, item name, or date (e.g. INV-1002, 2026-09)..." style="font-size:0.92rem; padding:12px 16px 12px 42px;">
+            <span style="position:absolute; left:14px; top:50%; transform:translateY(-50%); font-size:1.1rem; pointer-events:none;">🧾</span>
+          </div>
+        </div>
+
+        <!-- Records Invoices List -->
+        <div class="inventory-list-wrapper">
+          <div class="list-header-row record-header-row">
+            <div>Invoice Number</div>
+            <div>Date & Time</div>
+            <div>Items & Dispatched Quantities</div>
+            <div style="text-align:right;">Details</div>
+          </div>
+          <div class="inventory-list" id="recordsList">
+            <!-- Dynamically populated invoice cards / rows -->
+          </div>
+        </div>
+      </section>
 </main>
 
     <!-- Mobile Bottom Tab Bar -->
@@ -260,6 +325,10 @@
       <button class="mobile-nav-item" data-tab="inout">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
         <span>In & Out</span>
+      </button>
+      <button class="mobile-nav-item" data-tab="records">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span>Records</span>
       </button>
     </nav>
 
@@ -308,6 +377,15 @@
         
         <div style="padding: 14px 20px 0 20px; display:flex; flex-direction:column; gap:10px;">
           <input type="text" id="batchModalSearch" class="form-control" placeholder="🔍 Filter items in this list..." style="font-size:0.88rem;">
+          
+          <!-- Invoice Number Input (Shown when Dispatching) -->
+          <div id="batchInvoiceField" style="display:none;">
+            <div style="position:relative;">
+              <input type="text" id="batchModalInvoice" class="form-control" placeholder="Enter Invoice Number (e.g. INV-10029, #501)" style="font-size:0.92rem; font-weight:700; color:var(--text-primary); border-color:rgba(245, 158, 11, 0.45); background:rgba(245, 158, 11, 0.08); padding-left:38px;">
+              <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:1.05rem; pointer-events:none;">🧾</span>
+            </div>
+          </div>
+
           <input type="text" id="batchModalNote" class="form-control" placeholder="Optional reference note (e.g. Supplier Batch #401 / Distribution Store #2)" style="font-size:0.88rem;">
         </div>
 
@@ -327,6 +405,100 @@
               💾 Save & Update Database
             </button>
           </div>
+        </div>
+    <!-- Invoice Details Modal -->
+    <div class="modal-overlay" id="invoiceDetailsModal">
+      <div class="modal-card" style="max-width: 580px; max-height: 85vh; display: flex; flex-direction: column;">
+        <div class="modal-header">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:1.4rem;">🧾</span>
+              <div class="modal-title" id="invoiceDetailsTitle">Invoice #</div>
+            </div>
+            <div id="invoiceDetailsDate" style="font-size:0.8rem; color:var(--text-secondary); margin-top:4px;"></div>
+          </div>
+          <button class="modal-close" id="closeInvoiceDetailsModal">&times;</button>
+        </div>
+        
+        <div id="invoiceDetailsNoteBox" style="padding:10px 20px; background:rgba(255,255,255,0.03); border-bottom:1px solid var(--border-subtle); font-size:0.85rem; color:var(--text-secondary); display:none;">
+          <strong style="color:var(--text-primary);">Destination / Note:</strong> <span id="invoiceDetailsNote"></span>
+        </div>
+
+        <div class="modal-body" style="flex:1; overflow-y:auto; padding:16px 20px;">
+          <table class="ledger-table" style="width:100%;">
+            <thead>
+              <tr>
+                <th>Dispatched Item</th>
+                <th style="text-align:center;">Qty Dispatched</th>
+                <th style="text-align:right;">Remaining Stock</th>
+              </tr>
+            </thead>
+            <tbody id="invoiceDetailsTableBody">
+              <!-- Dynamically populated items -->
+            </tbody>
+          </table>
+        </div>
+
+        <div class="modal-footer" style="padding:14px 20px; border-top:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; background:var(--bg-surface-elevated);">
+          <div style="font-size:0.9rem; color:var(--text-secondary);">
+            Total Dispatched: <strong id="invoiceDetailsTotalUnits" style="color:var(--accent-amber); font-family:var(--font-mono); font-size:1.15rem;">0</strong> units
+          </div>
+          <button type="button" class="btn btn-secondary" id="closeInvoiceDetailsBtn" style="padding:8px 18px;">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Item In & Out History Modal -->
+    <div class="modal-overlay" id="itemHistoryModal">
+      <div class="modal-card" style="max-width: 660px; max-height: 85vh; display: flex; flex-direction: column;">
+        <div class="modal-header">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:1.4rem;">📜</span>
+              <div class="modal-title" id="itemHistoryTitle">Item Movement History</div>
+            </div>
+            <div id="itemHistorySubtitle" style="font-size:0.82rem; color:var(--text-secondary); margin-top:4px;"></div>
+          </div>
+          <button class="modal-close" id="closeItemHistoryModal">&times;</button>
+        </div>
+
+        <!-- Quick Summary Strip -->
+        <div style="padding:12px 20px; background:rgba(255,255,255,0.02); border-bottom:1px solid var(--border-subtle); display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; text-align:center;">
+          <div>
+            <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:600;">Current Stock</div>
+            <div id="itemHistoryCurrentStock" style="font-size:1.2rem; font-weight:800; color:var(--text-primary); font-family:var(--font-mono); margin-top:2px;">0</div>
+          </div>
+          <div>
+            <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:600;">Total In (+)</div>
+            <div id="itemHistoryTotalIn" style="font-size:1.2rem; font-weight:800; color:var(--accent-emerald); font-family:var(--font-mono); margin-top:2px;">0</div>
+          </div>
+          <div>
+            <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:600;">Total Out (-)</div>
+            <div id="itemHistoryTotalOut" style="font-size:1.2rem; font-weight:800; color:var(--accent-amber); font-family:var(--font-mono); margin-top:2px;">0</div>
+          </div>
+        </div>
+
+        <!-- Movements Ledger -->
+        <div class="modal-body" style="flex:1; overflow-y:auto; padding:16px 20px;">
+          <table class="ledger-table" style="width:100%;">
+            <thead>
+              <tr>
+                <th>Date & Time</th>
+                <th>Type</th>
+                <th style="text-align:center;">Qty</th>
+                <th>Invoice #</th>
+                <th>Notes / Ref</th>
+              </tr>
+            </thead>
+            <tbody id="itemHistoryTableBody">
+              <!-- Dynamically populated movements -->
+            </tbody>
+          </table>
+        </div>
+
+        <div class="modal-footer" style="padding:14px 20px; border-top:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; background:var(--bg-surface-elevated);">
+          <div id="itemHistoryRecordCount" style="font-size:0.82rem; color:var(--text-secondary);">0 records found</div>
+          <button type="button" class="btn btn-secondary" id="closeItemHistoryBtn" style="padding:8px 18px;">Close</button>
         </div>
       </div>
     </div>

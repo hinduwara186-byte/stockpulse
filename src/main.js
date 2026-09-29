@@ -135,6 +135,12 @@ async function initSupabaseClient() {
   }
 }
 
+function parseInvoiceNumber(notes) {
+  if (!notes) return null;
+  const match = notes.match(/Invoice\s*#?([A-Za-z0-9\-_/]+)/i);
+  return match ? match[1].trim() : null;
+}
+
 async function fetchRemoteProducts() {
   if (!supabase) return;
   const { data, error } = await supabase.from('products').select('*').order('name');
@@ -145,7 +151,7 @@ async function fetchRemoteMovements() {
   if (!supabase) return;
   const { data, error } = await supabase
     .from('transactions').select('*')
-    .order('created_at', { ascending: false }).limit(30);
+    .order('created_at', { ascending: false }).limit(1000);
   if (!error && data) {
     movements = data.map(tx => ({
       id:           tx.id,
@@ -153,10 +159,12 @@ async function fetchRemoteMovements() {
       product_name: tx.product_name,
       type:         tx.type === 'SHIPMENT_IN' ? 'IN' : 'OUT',
       quantity:     tx.quantity,
+      invoice_number: parseInvoiceNumber(tx.notes),
       note:         tx.notes || (tx.type === 'SHIPMENT_IN' ? 'Shipment Received' : 'Dispatched for Distribution'),
       created_at:   tx.created_at,
     }));
     renderInOutActivity();
+    renderRecordsPage();
   }
 }
 
@@ -185,10 +193,12 @@ function handleRemoteTransactionChange(payload) {
       product_name: tx.product_name,
       type:         tx.type === 'SHIPMENT_IN' ? 'IN' : 'OUT',
       quantity:     tx.quantity,
+      invoice_number: parseInvoiceNumber(tx.notes),
       note:         tx.notes || '',
       created_at:   tx.created_at,
     });
     renderInOutActivity();
+    renderRecordsPage();
   }
 }
 
@@ -223,6 +233,7 @@ function renderAll() {
   renderProducts();
   renderInOutList();
   renderInOutActivity();
+  renderRecordsPage();
 }
 
 function renderMetrics() {
@@ -262,7 +273,10 @@ function renderProducts() {
     return `
       <div class="inventory-list-row" id="prod-row-${p.id}">
         <div class="col-item">
-          <span class="item-title" style="font-size:1.05rem; font-weight:700;">${escapeHtml(p.name)}</span>
+          <button type="button" class="item-title-btn" onclick="window.openItemHistory('${p.id}')" title="Click to view In & Out history">
+            <span>${escapeHtml(p.name)}</span>
+            <span class="item-history-tag">📜 History</span>
+          </button>
         </div>
         <div class="col-stock">
           <span class="stock-pill ${badgeClass}">
@@ -309,7 +323,10 @@ function renderInOutList() {
     return `
       <div class="inventory-list-row" id="inout-row-${p.id}">
         <div class="col-item">
-          <span class="item-title" style="font-size:1.02rem; font-weight:700;">${escapeHtml(p.name)}</span>
+          <button type="button" class="item-title-btn" onclick="window.openItemHistory('${p.id}')" title="Click to view In & Out history">
+            <span>${escapeHtml(p.name)}</span>
+            <span class="item-history-tag">📜 History</span>
+          </button>
         </div>
         <div class="col-stock">
           <span class="stock-pill ${badgeClass}">
@@ -361,26 +378,34 @@ function openBatchModal(mode) {
   const titleEl    = document.getElementById('batchModalTitle');
   const subtitleEl = document.getElementById('batchModalSubtitle');
   const saveBtn    = document.getElementById('saveBatchUpdateBtn');
+  const invoiceField = document.getElementById('batchInvoiceField');
+  const invoiceInput = document.getElementById('batchModalInvoice');
 
   if (mode === 'IN') {
     titleEl.textContent    = '📥 Add Shipment — Receive Items into Stock';
     subtitleEl.textContent = 'Enter how many units arrived for each item. Leave 0 to skip.';
     saveBtn.textContent    = '💾 Save Shipment & Update Stock';
     saveBtn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+    if (invoiceField) invoiceField.style.display = 'none';
   } else {
     titleEl.textContent    = '📤 Out for Distribution — Dispatch Items from Stock';
     subtitleEl.textContent = 'Enter how many units to dispatch for each item. Leave 0 to skip.';
     saveBtn.textContent    = '💾 Save Distribution & Update Stock';
     saveBtn.style.background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+    if (invoiceField) invoiceField.style.display = 'block';
   }
 
   batchValues.clear();
   const searchInput = document.getElementById('batchModalSearch');
   if (searchInput) searchInput.value = '';
   document.getElementById('batchModalNote').value = '';
+  if (invoiceInput) invoiceInput.value = '';
 
   renderBatchModalItems();
   document.getElementById('batchInOutModal').classList.add('active');
+  if (mode === 'OUT' && invoiceInput) {
+    setTimeout(() => invoiceInput.focus(), 150);
+  }
 }
 
 function renderBatchModalItems() {
@@ -521,7 +546,18 @@ document.getElementById('resetBatchInputsBtn')?.addEventListener('click', () => 
 // Save Batch Update
 document.getElementById('saveBatchUpdateBtn')?.addEventListener('click', async () => {
   const note = (document.getElementById('batchModalNote')?.value || '').trim();
-  const noteText = note || (batchMode === 'IN' ? 'Shipment Arrival' : 'Dispatched for Distribution');
+  const invoiceVal = (document.getElementById('batchModalInvoice')?.value || '').trim();
+
+  let noteText;
+  if (batchMode === 'OUT') {
+    if (invoiceVal) {
+      noteText = `Invoice #${invoiceVal}${note ? ' • ' + note : ''}`;
+    } else {
+      noteText = note || 'Dispatched for Distribution';
+    }
+  } else {
+    noteText = note || 'Shipment Arrival';
+  }
 
   // Collect items with qty > 0 from batchValues
   const updates = [];
@@ -568,6 +604,7 @@ document.getElementById('saveBatchUpdateBtn')?.addEventListener('click', async (
         product_name: product.name,
         type:         batchMode,
         quantity:     qty,
+        invoice_number: batchMode === 'OUT' && invoiceVal ? invoiceVal : null,
         note:         noteText,
         created_at:   new Date().toISOString(),
       });
@@ -593,12 +630,16 @@ document.getElementById('saveBatchUpdateBtn')?.addEventListener('click', async (
     renderAll();
 
     const verb = batchMode === 'IN' ? 'Shipment saved' : 'Distribution recorded';
-    showToast(`${verb} — ${updates.length} item(s) updated!`, 'success');
+    const invMsg = batchMode === 'OUT' && invoiceVal ? ` [Invoice #${invoiceVal}]` : '';
+    showToast(`${verb}${invMsg} — ${updates.length} item(s) updated!`, 'success');
     playSuccessChime();
     triggerHaptic();
 
     // Close modal
     batchValues.clear();
+    if (document.getElementById('batchModalInvoice')) {
+      document.getElementById('batchModalInvoice').value = '';
+    }
     document.getElementById('batchInOutModal')?.classList.remove('active');
 
   } catch (err) {
@@ -811,11 +852,291 @@ function switchTab(tabId) {
   document.querySelectorAll('.view-section').forEach(view => {
     view.classList.toggle('active', view.id === `view-${tabId}`);
   });
+  if (tabId === 'records') {
+    renderRecordsPage();
+  }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 document.querySelectorAll('[data-tab]').forEach(btn => {
   btn.addEventListener('click', () => switchTab(btn.getAttribute('data-tab')));
+});
+
+// ── Date Formatting Utility ───────────────────────────────────────────────────
+function formatDateTime(isoString) {
+  if (!isoString) return '-';
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return isoString;
+    return d.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    }) + ' • ' + d.toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  } catch {
+    return isoString;
+  }
+}
+
+// ── Records & Invoices Management ──────────────────────────────────────────────
+function getInvoiceRecords() {
+  const invoiceMap = new Map();
+
+  movements.forEach(m => {
+    if (m.type !== 'OUT') return;
+    const inv = m.invoice_number || parseInvoiceNumber(m.note);
+    const key = inv ? `inv_${inv.toLowerCase()}` : `quick_${m.id}`;
+    const displayNum = inv || 'Quick Dispatch (No #)';
+
+    let cleanNote = m.note || '';
+    if (inv) {
+      cleanNote = cleanNote.replace(new RegExp(`Invoice\\s*#?${inv}(\\s*•\\s*)?`, 'i'), '').trim();
+    }
+
+    if (!invoiceMap.has(key)) {
+      invoiceMap.set(key, {
+        key,
+        invoice_number: displayNum,
+        raw_invoice: inv,
+        isCustomInvoice: !!inv,
+        created_at: m.created_at,
+        note: cleanNote,
+        items: [],
+        total_units: 0
+      });
+    }
+
+    const rec = invoiceMap.get(key);
+    rec.items.push({
+      product_id: m.product_id,
+      product_name: m.product_name,
+      quantity: Number(m.quantity) || 0,
+      created_at: m.created_at
+    });
+    rec.total_units += Number(m.quantity) || 0;
+    if (new Date(m.created_at) > new Date(rec.created_at)) {
+      rec.created_at = m.created_at;
+    }
+    if (!rec.note && cleanNote) {
+      rec.note = cleanNote;
+    }
+  });
+
+  return Array.from(invoiceMap.values()).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
+
+function renderRecordsPage() {
+  const container = document.getElementById('recordsList');
+  if (!container) return;
+
+  const allRecords = getInvoiceRecords();
+
+  const totalInvoices = allRecords.filter(r => r.isCustomInvoice).length;
+  const totalUnits = allRecords.reduce((sum, r) => sum + r.total_units, 0);
+
+  const totInvEl = document.getElementById('recordsTotalInvoices');
+  const totUnitsEl = document.getElementById('recordsTotalUnits');
+  const actProdEl = document.getElementById('recordsActiveProducts');
+
+  if (totInvEl) totInvEl.textContent = totalInvoices || allRecords.length;
+  if (totUnitsEl) totUnitsEl.textContent = totalUnits;
+  if (actProdEl) actProdEl.textContent = products.length;
+
+  const query = (document.getElementById('recordsSearch')?.value || '').toLowerCase().trim();
+  const filtered = allRecords.filter(r => {
+    if (!query) return true;
+    if (r.invoice_number.toLowerCase().includes(query)) return true;
+    if (r.note.toLowerCase().includes(query)) return true;
+    if (formatDateTime(r.created_at).toLowerCase().includes(query)) return true;
+    return r.items.some(i => i.product_name.toLowerCase().includes(query));
+  });
+
+  if (filtered.length === 0) {
+    container.innerHTML = `
+      <div style="text-align:center; padding:48px 20px; color:var(--text-secondary); animation:viewEnter 0.3s ease both;">
+        <div style="font-size:2.8rem; margin-bottom:10px;">🧾</div>
+        <p style="font-size:1.1rem; font-weight:600; color:var(--text-primary);">No invoice records found</p>
+        <p style="font-size:0.85rem; margin-top:4px;">Dispatches created with an Invoice Number will automatically appear here.</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = filtered.map(r => {
+    const itemsPreview = r.items
+      .map(i => `<span style="font-weight:600; color:var(--text-primary);">${escapeHtml(i.product_name)}</span>: <span style="font-family:var(--font-mono); color:var(--accent-amber); font-weight:700;">${i.quantity}</span>`)
+      .join('<span style="color:var(--text-muted); margin:0 6px;">•</span>');
+
+    return `
+      <div class="record-row" onclick="window.openInvoiceDetails('${escapeHtml(r.key)}')" title="Click to view full invoice breakdown">
+        <div>
+          <span class="invoice-pill">
+            <span>🧾</span>
+            <span>${escapeHtml(r.invoice_number)}</span>
+          </span>
+          ${r.note ? `<div style="font-size:0.78rem; color:var(--text-secondary); margin-top:4px;">📍 ${escapeHtml(r.note)}</div>` : ''}
+        </div>
+        <div style="color:var(--text-secondary); font-size:0.86rem; display:flex; align-items:center; gap:6px;">
+          <span>📅</span>
+          <span>${formatDateTime(r.created_at)}</span>
+        </div>
+        <div>
+          <div style="font-size:0.88rem; margin-bottom:3px;">
+            <strong style="color:var(--accent-amber); font-family:var(--font-mono); font-size:1rem;">${r.total_units}</strong> units dispatched
+            <span style="color:var(--text-muted); font-size:0.8rem;">(${r.items.length} item${r.items.length > 1 ? 's' : ''})</span>
+          </div>
+          <div style="font-size:0.78rem; line-height:1.4; color:var(--text-secondary);">
+            ${itemsPreview}
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <button class="btn btn-secondary" style="padding:6px 12px; font-size:0.8rem; pointer-events:none;">
+            View Details 👁️
+          </button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// Search input listener for Records page
+document.getElementById('recordsSearch')?.addEventListener('input', renderRecordsPage);
+
+// ── Invoice Details Modal ───────────────────────────────────────────────────────
+window.openInvoiceDetails = function(keyOrNum) {
+  const records = getInvoiceRecords();
+  const rec = records.find(r => r.key === keyOrNum || r.invoice_number === keyOrNum || r.raw_invoice === keyOrNum);
+  if (!rec) {
+    showToast('Invoice details not found', 'danger');
+    return;
+  }
+
+  const titleEl = document.getElementById('invoiceDetailsTitle');
+  const dateEl  = document.getElementById('invoiceDetailsDate');
+  const noteBox = document.getElementById('invoiceDetailsNoteBox');
+  const noteEl  = document.getElementById('invoiceDetailsNote');
+  const tbody   = document.getElementById('invoiceDetailsTableBody');
+  const totalEl = document.getElementById('invoiceDetailsTotalUnits');
+
+  if (titleEl) titleEl.textContent = `Invoice #${rec.invoice_number}`;
+  if (dateEl)  dateEl.textContent  = `Dispatched on ${formatDateTime(rec.created_at)}`;
+
+  if (rec.note) {
+    noteBox.style.display = 'block';
+    noteEl.textContent = rec.note;
+  } else {
+    noteBox.style.display = 'none';
+  }
+
+  tbody.innerHTML = rec.items.map(i => {
+    const prod = products.find(p => p.id === i.product_id || p.name === i.product_name);
+    const remainingStock = prod ? (Number(prod.stock_quantity) || 0) : '-';
+
+    return `
+      <tr>
+        <td style="font-weight:700; color:var(--text-primary); font-size:0.95rem;">${escapeHtml(i.product_name)}</td>
+        <td style="text-align:center; font-family:var(--font-mono); font-weight:800; color:var(--accent-amber); font-size:1.05rem;">
+          -${i.quantity}
+        </td>
+        <td style="text-align:right; font-family:var(--font-mono); font-weight:700; color:var(--text-secondary); font-size:0.92rem;">
+          ${remainingStock} in stock
+        </td>
+      </tr>`;
+  }).join('');
+
+  if (totalEl) totalEl.textContent = rec.total_units;
+  document.getElementById('invoiceDetailsModal')?.classList.add('active');
+};
+
+document.getElementById('closeInvoiceDetailsModal')?.addEventListener('click', () => {
+  document.getElementById('invoiceDetailsModal')?.classList.remove('active');
+});
+document.getElementById('closeInvoiceDetailsBtn')?.addEventListener('click', () => {
+  document.getElementById('invoiceDetailsModal')?.classList.remove('active');
+});
+document.getElementById('invoiceDetailsModal')?.addEventListener('click', (e) => {
+  if (e.target.id === 'invoiceDetailsModal') e.target.classList.remove('active');
+});
+
+// ── Item In & Out History Modal ────────────────────────────────────────────────
+window.openItemHistory = function(productId) {
+  const prod = products.find(p => p.id === productId);
+  if (!prod) return;
+
+  const itemMovements = movements.filter(m => m.product_id === prod.id || m.product_name === prod.name);
+
+  const titleEl = document.getElementById('itemHistoryTitle');
+  const subEl   = document.getElementById('itemHistorySubtitle');
+  const stockEl = document.getElementById('itemHistoryCurrentStock');
+  const inEl    = document.getElementById('itemHistoryTotalIn');
+  const outEl   = document.getElementById('itemHistoryTotalOut');
+  const countEl = document.getElementById('itemHistoryRecordCount');
+  const tbody   = document.getElementById('itemHistoryTableBody');
+
+  const currentStock = Number(prod.stock_quantity) || 0;
+  const totalIn = itemMovements.filter(m => m.type === 'IN').reduce((acc, m) => acc + (Number(m.quantity) || 0), 0);
+  const totalOut = itemMovements.filter(m => m.type === 'OUT').reduce((acc, m) => acc + (Number(m.quantity) || 0), 0);
+
+  if (titleEl) titleEl.textContent = `In & Out History — ${prod.name}`;
+  if (subEl)   subEl.textContent   = `Complete audit trail of all shipments received and stock dispatched for this item.`;
+  if (stockEl) stockEl.textContent = currentStock;
+  if (inEl)    inEl.textContent    = `+${totalIn}`;
+  if (outEl)   outEl.textContent   = `-${totalOut}`;
+  if (countEl) countEl.textContent = `${itemMovements.length} total movement(s) recorded`;
+
+  if (itemMovements.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="5" style="text-align:center; padding:32px 16px; color:var(--text-secondary);">
+          No movement history recorded for this item yet.
+        </td>
+      </tr>`;
+  } else {
+    tbody.innerHTML = itemMovements.map(m => {
+      const isIN = m.type === 'IN';
+      const inv = m.invoice_number || parseInvoiceNumber(m.note);
+      const cleanNote = inv ? (m.note || '').replace(new RegExp(`Invoice\\s*#?${inv}(\\s*•\\s*)?`, 'i'), '').trim() : (m.note || '-');
+
+      return `
+        <tr>
+          <td style="color:var(--text-secondary); font-size:0.82rem; white-space:nowrap;">
+            ${formatDateTime(m.created_at)}
+          </td>
+          <td>
+            <span class="stock-pill ${isIN ? 'in-stock' : 'low-stock'}" style="font-size:0.75rem; padding:2px 8px;">
+              ${isIN ? '📥 IN (Arrival)' : '📤 OUT (Dispatch)'}
+            </span>
+          </td>
+          <td style="text-align:center; font-family:var(--font-mono); font-weight:800; font-size:1.05rem; color:${isIN ? 'var(--accent-emerald)' : 'var(--accent-amber)'};">
+            ${isIN ? '+' : '-'}${m.quantity}
+          </td>
+          <td>
+            ${inv 
+              ? `<span class="invoice-pill" style="cursor:pointer;" onclick="event.stopPropagation(); window.openInvoiceDetails('${escapeHtml(inv)}')" title="Click to view full invoice breakdown">
+                  <span>🧾</span> ${escapeHtml(inv)}
+                 </span>`
+              : `<span style="color:var(--text-muted); font-size:0.8rem;">—</span>`
+            }
+          </td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">
+            ${escapeHtml(cleanNote || '-')}
+          </td>
+        </tr>`;
+    }).join('');
+  }
+
+  document.getElementById('itemHistoryModal')?.classList.add('active');
+};
+
+document.getElementById('closeItemHistoryModal')?.addEventListener('click', () => {
+  document.getElementById('itemHistoryModal')?.classList.remove('active');
+});
+document.getElementById('closeItemHistoryBtn')?.addEventListener('click', () => {
+  document.getElementById('itemHistoryModal')?.classList.remove('active');
+});
+document.getElementById('itemHistoryModal')?.addEventListener('click', (e) => {
+  if (e.target.id === 'itemHistoryModal') e.target.classList.remove('active');
 });
 
 
