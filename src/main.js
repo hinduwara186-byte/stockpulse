@@ -137,10 +137,10 @@ function setupBroadcastChannel() {
   if ('BroadcastChannel' in window) {
     broadcastChannel = new BroadcastChannel('stockpulse_simple_sync');
     broadcastChannel.onmessage = (event) => {
-      if (event.data?.type === 'PRODUCT_UPDATE') {
+      if (event.data?.type === 'PRODUCT_UPDATE' && !isLiveSupabase) {
         loadDataFromStorage();
         renderAll();
-        showToast('Realtime update received from another window/phone!', 'info');
+        showToast('Realtime update received from another window!', 'info');
         playBeep(523.25, 0.1);
       }
     };
@@ -202,7 +202,16 @@ function cleanInvoiceNote(note, inv) {
 async function fetchRemoteProducts() {
   if (!supabase) return;
   const { data, error } = await supabase.from('products').select('*').order('name');
-  if (!error && data) { products = data; renderAll(); }
+  if (!error && data) {
+    const seen = new Set();
+    products = data.filter(p => {
+      if (seen.has(String(p.id))) return false;
+      seen.add(String(p.id));
+      return true;
+    });
+    saveDataToStorage();
+    renderAll();
+  }
 }
 
 async function fetchRemoteMovements() {
@@ -212,16 +221,25 @@ async function fetchRemoteMovements() {
     .order('created_at', { ascending: false }).limit(1000);
   if (!error && data) {
     invalidateRecordsCache();
-    movements = data.map(tx => ({
-      id:           tx.id,
-      product_id:   tx.product_id,
-      product_name: tx.product_name,
-      type:         tx.type === 'SHIPMENT_IN' ? 'IN' : 'OUT',
-      quantity:     tx.quantity,
-      invoice_number: parseInvoiceNumber(tx.notes),
-      note:         tx.notes || (tx.type === 'SHIPMENT_IN' ? 'Shipment Received' : 'Dispatched for Distribution'),
-      created_at:   tx.created_at,
-    }));
+    const seen = new Set();
+    const cleanMovements = [];
+    for (const tx of data) {
+      if (!seen.has(String(tx.id))) {
+        seen.add(String(tx.id));
+        cleanMovements.push({
+          id:           tx.id,
+          product_id:   tx.product_id,
+          product_name: tx.product_name,
+          type:         tx.type === 'SHIPMENT_IN' ? 'IN' : 'OUT',
+          quantity:     tx.quantity,
+          invoice_number: parseInvoiceNumber(tx.notes),
+          note:         tx.notes || (tx.type === 'SHIPMENT_IN' ? 'Shipment Received' : 'Dispatched for Distribution'),
+          created_at:   tx.created_at,
+        });
+      }
+    }
+    movements = cleanMovements;
+    saveDataToStorage();
     if (currentActiveTab === 'inout') renderInOutActivity();
     if (currentActiveTab === 'records') renderRecordsPage();
   }
@@ -229,36 +247,96 @@ async function fetchRemoteMovements() {
 
 function handleRemoteProductChange(payload) {
   const { eventType, new: newRec, old: oldRec } = payload;
-  playSuccessChime();
   if (eventType === 'INSERT') {
+    const existingIdx = products.findIndex(p => 
+      String(p.id) === String(newRec.id) ||
+      (String(p.id).startsWith('prod-') && p.name.trim().toLowerCase() === newRec.name.trim().toLowerCase())
+    );
+
+    if (existingIdx !== -1) {
+      // Reconcile optimistic/existing entry with remote data
+      products[existingIdx] = newRec;
+      saveDataToStorage();
+      renderAll();
+      return;
+    }
+
     products.unshift(newRec);
+    saveDataToStorage();
+    playSuccessChime();
     showToast(`New item added: ${newRec.name}`, 'info');
+    renderAll();
   } else if (eventType === 'UPDATE') {
-    const idx = products.findIndex(p => p.id === newRec.id);
-    if (idx !== -1) { products[idx] = newRec; highlightUpdatedRow(newRec.id); }
-    showToast(`Stock updated for ${newRec.name}: now ${newRec.stock_quantity}`, 'success');
+    const idx = products.findIndex(p => String(p.id) === String(newRec.id));
+    if (idx !== -1) {
+      const wasSameStock = Number(products[idx].stock_quantity) === Number(newRec.stock_quantity);
+      products[idx] = newRec;
+      highlightUpdatedRow(newRec.id);
+      saveDataToStorage();
+      renderAll();
+      if (!wasSameStock) {
+        playSuccessChime();
+        showToast(`Stock updated for ${newRec.name}: now ${newRec.stock_quantity}`, 'success');
+      }
+    }
   } else if (eventType === 'DELETE') {
-    products = products.filter(p => p.id !== oldRec.id);
+    products = products.filter(p => String(p.id) !== String(oldRec.id));
+    saveDataToStorage();
+    renderAll();
   }
-  renderAll();
 }
 
 function handleRemoteTransactionChange(payload) {
   if (payload.eventType === 'INSERT') {
-    invalidateRecordsCache();
     const tx = payload.new;
-    movements.unshift({
-      id:           tx.id,
-      product_id:   tx.product_id,
-      product_name: tx.product_name,
-      type:         tx.type === 'SHIPMENT_IN' ? 'IN' : 'OUT',
-      quantity:     tx.quantity,
-      invoice_number: parseInvoiceNumber(tx.notes),
-      note:         tx.notes || '',
-      created_at:   tx.created_at,
+    // 1. Skip if transaction already exists by ID
+    if (movements.some(m => String(m.id) === String(tx.id))) {
+      return;
+    }
+
+    const txType = tx.type === 'SHIPMENT_IN' ? 'IN' : 'OUT';
+    const txInv  = parseInvoiceNumber(tx.notes);
+
+    // 2. Reconcile if matching a local optimistic placeholder
+    const optIdx = movements.findIndex(m => {
+      if (!m.id || !String(m.id).startsWith('m-')) return false;
+      if (String(m.product_id) !== String(tx.product_id)) return false;
+      if (m.type !== txType) return false;
+      if (Number(m.quantity) !== Number(tx.quantity)) return false;
+      if (txInv && m.invoice_number && m.invoice_number.toLowerCase() !== txInv.toLowerCase()) return false;
+      return true;
     });
-    if (currentActiveTab === 'inout') renderInOutActivity();
-    if (currentActiveTab === 'records') renderRecordsPage();
+
+    invalidateRecordsCache();
+
+    if (optIdx !== -1) {
+      movements[optIdx].id = tx.id;
+      movements[optIdx].created_at = tx.created_at;
+      movements[optIdx].note = tx.notes || movements[optIdx].note;
+      movements[optIdx].invoice_number = txInv || movements[optIdx].invoice_number;
+    } else {
+      // Remote transaction arrived from another device
+      movements.unshift({
+        id:           tx.id,
+        product_id:   tx.product_id,
+        product_name: tx.product_name,
+        type:         txType,
+        quantity:     tx.quantity,
+        invoice_number: txInv,
+        note:         tx.notes || '',
+        created_at:   tx.created_at,
+      });
+      playSuccessChime();
+    }
+
+    saveDataToStorage();
+    if (currentActiveTab === 'inout') {
+      renderInOutActivity();
+      renderInOutList();
+    }
+    if (currentActiveTab === 'records') {
+      renderRecordsPage();
+    }
   }
 }
 
@@ -723,7 +801,7 @@ document.getElementById('saveBatchUpdateBtn')?.addEventListener('click', async (
       // Optimistic local update
       product.stock_quantity = newStock;
       product.updated_at     = new Date().toISOString();
-      movements.unshift({
+      const optMov = {
         id:           'm-' + Date.now() + '-' + product.id,
         product_id:   product.id,
         product_name: product.name,
@@ -732,7 +810,8 @@ document.getElementById('saveBatchUpdateBtn')?.addEventListener('click', async (
         invoice_number: batchMode === 'OUT' && invoiceVal ? invoiceVal : null,
         note:         noteText,
         created_at:   new Date().toISOString(),
-      });
+      };
+      movements.unshift(optMov);
 
       if (isLiveSupabase && supabase) {
         await supabase.from('products').update({
@@ -740,13 +819,18 @@ document.getElementById('saveBatchUpdateBtn')?.addEventListener('click', async (
           updated_at:     new Date().toISOString(),
         }).eq('id', product.id);
 
-        await supabase.from('transactions').insert({
+        const { data: txData } = await supabase.from('transactions').insert({
           product_id:   product.id,
           product_name: product.name,
           type:         batchMode === 'IN' ? 'SHIPMENT_IN' : 'SALE_OUT',
           quantity:     qty,
           notes:        noteText,
-        });
+        }).select().single();
+
+        if (txData) {
+          optMov.id = txData.id;
+          optMov.created_at = txData.created_at;
+        }
       }
       highlightUpdatedRow(product.id);
     }
@@ -859,7 +943,7 @@ document.getElementById('adjustStockForm')?.addEventListener('submit', async (e)
 
   prod.stock_quantity = newStock;
   prod.updated_at     = new Date().toISOString();
-  movements.unshift({
+  const optMov = {
     id:           'm-' + Date.now(),
     product_id:   prod.id,
     product_name: prod.name,
@@ -867,7 +951,8 @@ document.getElementById('adjustStockForm')?.addEventListener('submit', async (e)
     quantity:     qty,
     note:         activeAdjustAction === 'ADD' ? 'Shipment Arrival' : 'Dispatched for Distribution',
     created_at:   new Date().toISOString(),
-  });
+  };
+  movements.unshift(optMov);
   saveDataToStorage();
   renderAll();
   highlightUpdatedRow(prod.id);
@@ -879,13 +964,18 @@ document.getElementById('adjustStockForm')?.addEventListener('submit', async (e)
         updated_at:     new Date().toISOString(),
       }).eq('id', prod.id);
 
-      await supabase.from('transactions').insert({
+      const { data: txData } = await supabase.from('transactions').insert({
         product_id:   prod.id,
         product_name: prod.name,
         type:         activeAdjustAction === 'ADD' ? 'SHIPMENT_IN' : 'SALE_OUT',
         quantity:     qty,
         notes:        activeAdjustAction === 'ADD' ? 'Quick Stock Addition' : 'Quick Stock Deduction',
-      });
+      }).select().single();
+
+      if (txData) {
+        optMov.id = txData.id;
+        optMov.created_at = txData.created_at;
+      }
     } catch (err) {
       showToast('Error syncing with database: ' + err.message, 'danger');
       return;
@@ -911,7 +1001,7 @@ document.getElementById('directAddItemForm')?.addEventListener('submit', async (
     try {
       const { data, error } = await supabase.from('products').insert(newObj).select().single();
       if (error) throw error;
-      if (data && !products.some(p => p.id === data.id)) {
+      if (data && !products.some(p => String(p.id) === String(data.id))) {
         products.unshift(data);
         saveDataToStorage();
         renderAll();
@@ -951,7 +1041,7 @@ document.getElementById('directAddPetFoodForm')?.addEventListener('submit', asyn
     try {
       const { data, error } = await supabase.from('products').insert(newObj).select().single();
       if (error) throw error;
-      if (data && !products.some(p => p.id === data.id)) {
+      if (data && !products.some(p => String(p.id) === String(data.id))) {
         products.unshift(data);
         saveDataToStorage();
         renderAll();
@@ -1079,10 +1169,18 @@ function getInvoiceRecords() {
   if (cachedInvoiceRecords) return cachedInvoiceRecords;
 
   const invoiceMap = new Map();
+  const seenTxIds = new Set();
 
   for (let idx = 0; idx < movements.length; idx++) {
     const m = movements[idx];
     if (m.type !== 'OUT') continue;
+
+    // Deduplicate identical transaction IDs
+    if (m.id) {
+      if (seenTxIds.has(String(m.id))) continue;
+      seenTxIds.add(String(m.id));
+    }
+
     const inv = m.invoice_number || parseInvoiceNumber(m.note);
     const key = inv ? `inv_${inv.toLowerCase()}` : `quick_${m.id}`;
     const displayNum = inv || 'Quick Dispatch (No #)';
@@ -1108,14 +1206,35 @@ function getInvoiceRecords() {
       invoiceMap.set(key, rec);
     }
 
+    const qty = Number(m.quantity) || 0;
+
+    // Guard against duplicate optimistic + remote items inside the same invoice
+    const duplicateItemIdx = rec.items.findIndex(existing => 
+      String(existing.product_id) === String(m.product_id) &&
+      Number(existing.quantity) === qty &&
+      (
+        existing.id === m.id ||
+        (String(existing.id).startsWith('m-') || String(m.id).startsWith('m-'))
+      ) &&
+      Math.abs(new Date(existing.created_at).getTime() - new Date(m.created_at).getTime()) < 30000
+    );
+
+    if (duplicateItemIdx !== -1) {
+      if (String(rec.items[duplicateItemIdx].id).startsWith('m-') && !String(m.id).startsWith('m-')) {
+        rec.items[duplicateItemIdx].id = m.id;
+        rec.items[duplicateItemIdx].created_at = m.created_at;
+      }
+      continue;
+    }
+
     if (itemIsPetFood) {
       rec.hasPetFood = true;
     } else {
       rec.hasPoultry = true;
     }
 
-    const qty = Number(m.quantity) || 0;
     rec.items.push({
+      id: m.id,
       product_id: m.product_id,
       product_name: m.product_name,
       quantity: qty,
