@@ -569,9 +569,28 @@ function renderInOutActivity() {
 
 // Current batch values map: productId -> quantity
 const batchValues = new Map();
+let batchCategoryFilter = 'ALL'; // 'ALL' | 'POULTRY' | 'PET_FOOD'
 
-function openBatchModal(mode) {
+function openBatchModal(mode, explicitCategory = null) {
   batchMode = mode; // 'IN' or 'OUT'
+
+  // Determine category filter based on explicit parameter or current page tab
+  if (explicitCategory === 'petfood' || (!explicitCategory && currentActiveTab === 'petfood')) {
+    batchCategoryFilter = 'PET_FOOD';
+  } else if (explicitCategory === 'poultry' || (!explicitCategory && (currentActiveTab === 'poultry' || currentActiveTab === 'inventory'))) {
+    batchCategoryFilter = 'POULTRY';
+  } else {
+    batchCategoryFilter = 'ALL';
+  }
+
+  // Update pills inside batch modal
+  document.querySelectorAll('#batchCategoryPills .filter-pill').forEach(pill => {
+    const cat = pill.getAttribute('data-batch-cat');
+    pill.classList.toggle('active', cat === batchCategoryFilter);
+  });
+
+  const isPetModal     = batchCategoryFilter === 'PET_FOOD';
+  const isPoultryModal = batchCategoryFilter === 'POULTRY';
 
   const titleEl    = document.getElementById('batchModalTitle');
   const subtitleEl = document.getElementById('batchModalSubtitle');
@@ -580,14 +599,30 @@ function openBatchModal(mode) {
   const invoiceInput = document.getElementById('batchModalInvoice');
 
   if (mode === 'IN') {
-    titleEl.textContent    = '📥 Add Shipment — Receive Items into Stock';
-    subtitleEl.textContent = 'Enter how many units arrived for each item. Leave 0 to skip.';
+    if (isPetModal) {
+      titleEl.textContent    = '📥 Add Shipment — Pet Food Arrivals';
+      subtitleEl.textContent = 'Enter how many pet food units arrived. Leave 0 to skip.';
+    } else if (isPoultryModal) {
+      titleEl.textContent    = '📥 Add Shipment — Poultry Arrivals';
+      subtitleEl.textContent = 'Enter how many poultry units arrived. Leave 0 to skip.';
+    } else {
+      titleEl.textContent    = '📥 Add Shipment — Receive Items into Stock';
+      subtitleEl.textContent = 'Enter how many units arrived for each item. Leave 0 to skip.';
+    }
     saveBtn.textContent    = '💾 Save Shipment & Update Stock';
     saveBtn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
     if (invoiceField) invoiceField.style.display = 'none';
   } else {
-    titleEl.textContent    = '📤 Out for Distribution — Dispatch Items from Stock';
-    subtitleEl.textContent = 'Enter how many units to dispatch for each item. Leave 0 to skip.';
+    if (isPetModal) {
+      titleEl.textContent    = '📤 Dispatched Pet Food — Out for Distribution';
+      subtitleEl.textContent = 'Enter how many pet food units to dispatch. Leave 0 to skip.';
+    } else if (isPoultryModal) {
+      titleEl.textContent    = '📤 Out for Distribution — Dispatch Poultry Items';
+      subtitleEl.textContent = 'Enter how many poultry units to dispatch. Leave 0 to skip.';
+    } else {
+      titleEl.textContent    = '📤 Out for Distribution — Dispatch Items from Stock';
+      subtitleEl.textContent = 'Enter how many units to dispatch for each item. Leave 0 to skip.';
+    }
     saveBtn.textContent    = '💾 Save Distribution & Update Stock';
     saveBtn.style.background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
     if (invoiceField) invoiceField.style.display = 'block';
@@ -595,7 +630,14 @@ function openBatchModal(mode) {
 
   batchValues.clear();
   const searchInput = document.getElementById('batchModalSearch');
-  if (searchInput) searchInput.value = '';
+  if (searchInput) {
+    searchInput.value = '';
+    searchInput.placeholder = isPetModal 
+      ? '🔍 Filter pet food items...' 
+      : isPoultryModal 
+        ? '🔍 Filter poultry items...' 
+        : '🔍 Filter items in this list...';
+  }
   document.getElementById('batchModalNote').value = '';
   if (invoiceInput) invoiceInput.value = '';
 
@@ -610,13 +652,21 @@ function renderBatchModalItems() {
   const container = document.getElementById('batchModalItemsList');
   if (!container) return;
 
+  let targetProducts = products;
+  if (batchCategoryFilter === 'PET_FOOD') {
+    targetProducts = getPetFoodProducts();
+  } else if (batchCategoryFilter === 'POULTRY') {
+    targetProducts = getPoultryProducts();
+  }
+
   const searchFilter = (document.getElementById('batchModalSearch')?.value || '').toLowerCase().trim();
-  const filteredProducts = products.filter(p => !searchFilter || p.name.toLowerCase().includes(searchFilter));
+  const filteredProducts = targetProducts.filter(p => !searchFilter || p.name.toLowerCase().includes(searchFilter));
 
   if (filteredProducts.length === 0) {
+    const catLabel = batchCategoryFilter === 'PET_FOOD' ? 'pet food' : batchCategoryFilter === 'POULTRY' ? 'poultry' : '';
     container.innerHTML = `
       <div style="text-align:center; padding:32px 16px; color:var(--text-secondary);">
-        No matching items found.
+        No matching ${catLabel} items found.
       </div>`;
     updateBatchTotalCount();
     return;
@@ -861,11 +911,39 @@ document.getElementById('saveBatchUpdateBtn')?.addEventListener('click', async (
 
 // Open Batch Shipment / Distribution buttons anywhere in the app
 document.querySelectorAll('.js-open-shipment, #openShipmentBatchBtn').forEach(btn => {
-  btn.addEventListener('click', () => openBatchModal('IN'));
+  btn.addEventListener('click', () => {
+    const cat = btn.getAttribute('data-category');
+    openBatchModal('IN', cat);
+  });
 });
 
 document.querySelectorAll('.js-open-distribution, #openDistributionBatchBtn').forEach(btn => {
-  btn.addEventListener('click', () => openBatchModal('OUT'));
+  btn.addEventListener('click', () => {
+    const cat = btn.getAttribute('data-category');
+    openBatchModal('OUT', cat);
+  });
+});
+
+// Category Filter Pills inside Batch Modal
+document.querySelectorAll('#batchCategoryPills [data-batch-cat]').forEach(pill => {
+  pill.addEventListener('click', () => {
+    document.querySelectorAll('#batchCategoryPills .filter-pill').forEach(p => p.classList.remove('active'));
+    pill.classList.add('active');
+    batchCategoryFilter = pill.getAttribute('data-batch-cat') || 'ALL';
+
+    const isPetModal = batchCategoryFilter === 'PET_FOOD';
+    const isPoultryModal = batchCategoryFilter === 'POULTRY';
+    const searchInput = document.getElementById('batchModalSearch');
+    if (searchInput) {
+      searchInput.placeholder = isPetModal 
+        ? '🔍 Filter pet food items...' 
+        : isPoultryModal 
+          ? '🔍 Filter poultry items...' 
+          : '🔍 Filter items in this list...';
+    }
+
+    renderBatchModalItems();
+  });
 });
 
 // Close Batch Modal
