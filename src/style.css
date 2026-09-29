@@ -1391,3 +1391,93 @@ body {
   border-color: var(--accent-cyan);
 }
 
+/* ============================================================================
+   PET FOOD & POULTRY SPECIFIC STYLES
+   ============================================================================ */
+.invoice-pill.pet-food-invoice {
+  color: var(--accent-emerald);
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.45);
+}
+
+.category-tag-pet {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  background: rgba(16, 185, 129, 0.22);
+  color: #34d399;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-left: 4px;
+}
+
+.category-tag-poultry {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-left: 4px;
+}
+
+.record-row.pet-food-row {
+  border-left: 4px solid var(--accent-emerald);
+}
+
+.record-row.pet-food-row:hover {
+  background: rgba(16, 185, 129, 0.04);
+}
+
+.record-row.poultry-row {
+  border-left: 4px solid var(--accent-amber);
+}
+
+.record-row.poultry-row:hover {
+  background: rgba(245, 158, 11, 0.04);
+}
+
+/* Filter pills on records & batch modal */
+.records-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.filter-pill {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all var(--transition-fast);
+}
+
+.filter-pill:hover {
+  color: var(--text-primary);
+  border-color: var(--border-glass);
+}
+
+.filter-pill.active {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--accent-amber);
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.filter-pill.pet-pill.active {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--accent-emerald);
+  border-color: rgba(16, 185, 129, 0.45);
+}
+

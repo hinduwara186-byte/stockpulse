@@ -13,27 +13,51 @@ document.addEventListener('keydown', (e) => {
 
 import { createClient } from '@supabase/supabase-js';
 
-// Default starter products (Name & Count only)
+// Default starter products
 const DEFAULT_PRODUCTS = [
-  { id: '1', name: 'Arabica Coffee Beans 1kg',       stock_quantity: 45, min_alert_qty: 5, updated_at: new Date().toISOString() },
-  { id: '2', name: 'Organic Green Tea (50 bags)',     stock_quantity: 18, min_alert_qty: 5, updated_at: new Date().toISOString() },
-  { id: '3', name: 'USB-C Fast Charging Cable',       stock_quantity: 60, min_alert_qty: 5, updated_at: new Date().toISOString() },
-  { id: '4', name: 'Wireless Bluetooth Earbuds',      stock_quantity:  8, min_alert_qty: 5, updated_at: new Date().toISOString() },
-  { id: '5', name: 'Stainless Steel Water Bottle',    stock_quantity:  3, min_alert_qty: 5, updated_at: new Date().toISOString() },
+  { id: '1', name: 'Broiler Starter Feed 50kg',     category: 'Poultry',  stock_quantity: 45, min_alert_qty: 5, updated_at: new Date().toISOString() },
+  { id: '2', name: 'Layer Mash High Protein 50kg',  category: 'Poultry',  stock_quantity: 28, min_alert_qty: 5, updated_at: new Date().toISOString() },
+  { id: '3', name: 'Broiler Finisher Pellets 50kg', category: 'Poultry',  stock_quantity: 60, min_alert_qty: 5, updated_at: new Date().toISOString() },
+  { id: '4', name: 'Chick Booster Vitamins 1L',     category: 'Poultry',  stock_quantity:  8, min_alert_qty: 5, updated_at: new Date().toISOString() },
+  { id: 'pf-1', name: 'Pedigree Adult Dog Food 10kg', category: 'Pet Food', stock_quantity: 25, min_alert_qty: 4, updated_at: new Date().toISOString() },
+  { id: 'pf-2', name: 'Whiskas Ocean Fish Cat 3kg',   category: 'Pet Food', stock_quantity: 16, min_alert_qty: 4, updated_at: new Date().toISOString() },
 ];
 
 const DEFAULT_MOVEMENTS = [
-  { id: 'm-1', product_id: '1', product_name: 'Arabica Coffee Beans 1kg',  type: 'IN',  quantity: 20, note: 'Supplier Shipment Arrival',         created_at: new Date(Date.now() - 3600000 * 5).toISOString() },
-  { id: 'm-2', product_id: '4', product_name: 'Wireless Bluetooth Earbuds', type: 'OUT', quantity:  2, note: 'Dispatched for Store Distribution', created_at: new Date(Date.now() - 3600000 * 2).toISOString() },
+  { id: 'm-1', product_id: '1', product_name: 'Broiler Starter Feed 50kg',      type: 'IN',  quantity: 20, note: 'Supplier Shipment Arrival',         created_at: new Date(Date.now() - 3600000 * 5).toISOString() },
+  { id: 'm-2', product_id: 'pf-1', product_name: 'Pedigree Adult Dog Food 10kg', type: 'OUT', quantity:  4, note: 'Invoice #INV-PF-101 • Pet Store Dispatch', invoice_number: 'INV-PF-101', created_at: new Date(Date.now() - 3600000 * 2).toISOString() },
 ];
 
 // ── App State ──────────────────────────────────────────────────────────────────
-let supabase         = null;
-let isLiveSupabase   = false;
-let products         = [];
-let movements        = [];
-let broadcastChannel = null;
-let currentActiveTab = 'inventory';
+let supabase             = null;
+let isLiveSupabase       = false;
+let products             = [];
+let movements            = [];
+let broadcastChannel     = null;
+let currentActiveTab     = 'poultry'; // 'poultry' | 'petfood' | 'inout' | 'records'
+let currentInvoiceFilter = 'ALL';     // 'ALL' | 'POULTRY' | 'PET_FOOD'
+
+// ── Category Classification Helpers ────────────────────────────────────────────
+function isPetFood(category) {
+  if (!category) return false;
+  return String(category).trim().toLowerCase() === 'pet food';
+}
+
+function isPetFoodProduct(productOrId, productName) {
+  if (productOrId && typeof productOrId === 'object') {
+    return isPetFood(productOrId.category);
+  }
+  const prod = products.find(p => String(p.id) === String(productOrId) || p.name === productName);
+  return prod ? isPetFood(prod.category) : false;
+}
+
+function getPoultryProducts() {
+  return products.filter(p => !isPetFood(p.category));
+}
+
+function getPetFoodProducts() {
+  return products.filter(p => isPetFood(p.category));
+}
 
 // Memoized invoice records cache
 let cachedInvoiceRecords = null;
@@ -269,14 +293,17 @@ function saveDataToStorage() {
 function renderAll(forceAll = false) {
   renderMetrics();
   if (forceAll) {
-    renderProducts();
+    renderPoultryProducts();
+    renderPetFoodProducts();
     renderInOutList();
     renderInOutActivity();
     renderRecordsPage();
     return;
   }
-  if (currentActiveTab === 'inventory') {
-    renderProducts();
+  if (currentActiveTab === 'poultry' || currentActiveTab === 'inventory') {
+    renderPoultryProducts();
+  } else if (currentActiveTab === 'petfood') {
+    renderPetFoodProducts();
   } else if (currentActiveTab === 'inout') {
     renderInOutList();
     renderInOutActivity();
@@ -286,67 +313,111 @@ function renderAll(forceAll = false) {
 }
 
 function renderMetrics() {
-  const totalItems = products.length;
-  const totalUnits = products.reduce((acc, p) => acc + (Number(p.stock_quantity) || 0), 0);
-  const lowStock   = products.filter(p => (Number(p.stock_quantity) || 0) <= (Number(p.min_alert_qty) || 5)).length;
-  document.getElementById('metricTotalSkus').textContent  = totalItems;
-  document.getElementById('metricTotalUnits').textContent = totalUnits;
-  document.getElementById('metricLowStock').textContent   = lowStock;
+  let currentItems = products;
+  let labelText = 'Total Items';
+
+  if (currentActiveTab === 'petfood') {
+    currentItems = getPetFoodProducts();
+    labelText = 'Pet Food Items';
+  } else if (currentActiveTab === 'poultry' || currentActiveTab === 'inventory') {
+    currentItems = getPoultryProducts();
+    labelText = 'Poultry Items';
+  }
+
+  const totalItems = currentItems.length;
+  const totalUnits = currentItems.reduce((acc, p) => acc + (Number(p.stock_quantity) || 0), 0);
+  const lowStock   = currentItems.filter(p => (Number(p.stock_quantity) || 0) <= (Number(p.min_alert_qty) || 5)).length;
+
+  const skusEl = document.getElementById('metricTotalSkus');
+  const unitsEl = document.getElementById('metricTotalUnits');
+  const lowEl = document.getElementById('metricLowStock');
+  const labelEl = document.getElementById('metricSkusLabel');
+
+  if (skusEl) skusEl.textContent = totalItems;
+  if (unitsEl) unitsEl.textContent = totalUnits;
+  if (lowEl) lowEl.textContent = lowStock;
+  if (labelEl) labelEl.textContent = labelText;
 }
 
-// Page 1 – Main Stock List
-function renderProducts() {
+function renderItemRowHtml(p) {
+  const stock    = Number(p.stock_quantity) || 0;
+  const alertQty = Number(p.min_alert_qty)  || 5;
+  let badgeClass = 'in-stock', badgeLabel = 'in stock';
+  if (stock === 0)          { badgeClass = 'out-of-stock'; badgeLabel = 'out of stock'; }
+  else if (stock <= alertQty) { badgeClass = 'low-stock';   badgeLabel = 'low stock'; }
+
+  return `
+    <div class="inventory-list-row" id="prod-row-${p.id}">
+      <div class="col-item">
+        <button type="button" class="item-title-btn" data-history-id="${p.id}" onclick="window.openItemHistory('${p.id}')" title="Click to view In & Out history">
+          <span>${escapeHtml(p.name)}</span>
+          <span class="item-history-tag">📜 History</span>
+        </button>
+      </div>
+      <div class="col-stock">
+        <span class="stock-pill ${badgeClass}">
+          <span style="font-size:1.25rem; font-weight:800;">${stock}</span> ${badgeLabel}
+        </span>
+      </div>
+      <div class="col-actions">
+        <button class="btn-list-action restock" onclick="window.openStockAdjust('${p.id}','ADD')" title="Add stock">
+          <span>+</span> Add Stock
+        </button>
+        <button class="btn-list-action deduct" onclick="window.openStockAdjust('${p.id}','DEDUCT')" title="Remove stock">
+          <span>-</span> Remove Stock
+        </button>
+        <button class="btn-list-action delete" onclick="window.deleteItem('${p.id}')" title="Delete item">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+          </svg>
+        </button>
+      </div>
+    </div>`;
+}
+
+// Page 1 – Poultry Stock List
+function renderPoultryProducts() {
   const listContainer = document.getElementById('inventoryList');
   if (!listContainer) return;
 
+  const poultryItems = getPoultryProducts();
   const searchVal = (document.getElementById('inventorySearch')?.value || '').toLowerCase().trim();
-  const filtered  = products.filter(p => !searchVal || p.name.toLowerCase().includes(searchVal));
+  const filtered  = poultryItems.filter(p => !searchVal || p.name.toLowerCase().includes(searchVal));
 
   if (filtered.length === 0) {
     listContainer.innerHTML = `
       <div style="text-align:center; padding:48px 20px; color:var(--text-secondary); animation:viewEnter 0.3s ease both;">
-        <div style="font-size:2.8rem; margin-bottom:10px;">📋</div>
-        <p style="font-size:1.1rem; font-weight:600; color:var(--text-primary);">No items found</p>
-        <p style="font-size:0.85rem; margin-top:4px;">Use the "+ Add New Item" form above to add an item.</p>
+        <div style="font-size:2.8rem; margin-bottom:10px;">🐔</div>
+        <p style="font-size:1.1rem; font-weight:600; color:var(--text-primary);">No poultry items found</p>
+        <p style="font-size:0.85rem; margin-top:4px;">Use the "+ Add New Poultry Item" form above to add an item.</p>
       </div>`;
     return;
   }
 
-  listContainer.innerHTML = filtered.map(p => {
-    const stock    = Number(p.stock_quantity) || 0;
-    const alertQty = Number(p.min_alert_qty)  || 5;
-    let badgeClass = 'in-stock', badgeLabel = 'in stock';
-    if (stock === 0)          { badgeClass = 'out-of-stock'; badgeLabel = 'out of stock'; }
-    else if (stock <= alertQty) { badgeClass = 'low-stock';   badgeLabel = 'low stock'; }
+  listContainer.innerHTML = filtered.map(p => renderItemRowHtml(p)).join('');
+}
+const renderProducts = renderPoultryProducts;
 
-    return `
-      <div class="inventory-list-row" id="prod-row-${p.id}">
-        <div class="col-item">
-          <button type="button" class="item-title-btn" data-history-id="${p.id}" onclick="window.openItemHistory('${p.id}')" title="Click to view In & Out history">
-            <span>${escapeHtml(p.name)}</span>
-            <span class="item-history-tag">📜 History</span>
-          </button>
-        </div>
-        <div class="col-stock">
-          <span class="stock-pill ${badgeClass}">
-            <span style="font-size:1.25rem; font-weight:800;">${stock}</span> ${badgeLabel}
-          </span>
-        </div>
-        <div class="col-actions">
-          <button class="btn-list-action restock" onclick="window.openStockAdjust('${p.id}','ADD')" title="Add stock">
-            <span>+</span> Add Stock
-          </button>
-          <button class="btn-list-action deduct" onclick="window.openStockAdjust('${p.id}','DEDUCT')" title="Remove stock">
-            <span>-</span> Remove Stock
-          </button>
-          <button class="btn-list-action delete" onclick="window.deleteItem('${p.id}')" title="Delete item">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-            </svg>
-          </button>
-        </div>
+// Page 2 – Pet Food Stock List
+function renderPetFoodProducts() {
+  const listContainer = document.getElementById('petFoodList');
+  if (!listContainer) return;
+
+  const petFoodItems = getPetFoodProducts();
+  const searchVal = (document.getElementById('petFoodSearch')?.value || '').toLowerCase().trim();
+  const filtered  = petFoodItems.filter(p => !searchVal || p.name.toLowerCase().includes(searchVal));
+
+  if (filtered.length === 0) {
+    listContainer.innerHTML = `
+      <div style="text-align:center; padding:48px 20px; color:var(--text-secondary); animation:viewEnter 0.3s ease both;">
+        <div style="font-size:2.8rem; margin-bottom:10px;">🐾</div>
+        <p style="font-size:1.1rem; font-weight:600; color:var(--text-primary);">No pet food items found</p>
+        <p style="font-size:0.85rem; margin-top:4px;">Use the "+ Add New Pet Food Item" form above to add an item.</p>
       </div>`;
-  }).join('');
+    return;
+  }
+
+  listContainer.innerHTML = filtered.map(p => renderItemRowHtml(p)).join('');
 }
 
 // Page 2 – In & Out list (same items, read-only view of stock)
@@ -477,10 +548,17 @@ function renderBatchModalItems() {
     const stock = Number(p.stock_quantity) || 0;
     const currentVal = batchValues.has(p.id) ? batchValues.get(p.id) : 0;
     const isActive = currentVal > 0;
+    const isPet = isPetFoodProduct(p);
+    const categoryBadge = isPet 
+      ? `<span class="category-tag-pet" style="font-size:0.72rem; padding:1px 6px;">🐾 Pet Food</span>`
+      : `<span class="category-tag-poultry" style="font-size:0.72rem; padding:1px 6px;">🐔 Poultry</span>`;
     return `
       <div class="batch-item-row ${isActive ? 'batch-row-active' : ''}" id="batch-row-${p.id}" data-product-id="${p.id}">
         <div class="batch-item-name">
-          <span style="font-weight:700; font-size:0.97rem;">${escapeHtml(p.name)}</span>
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span style="font-weight:700; font-size:0.97rem;">${escapeHtml(p.name)}</span>
+            ${categoryBadge}
+          </div>
           <span class="batch-current-stock">Available: <strong>${stock}</strong></span>
         </div>
         <div class="batch-qty-control">
@@ -820,14 +898,14 @@ document.getElementById('adjustStockForm')?.addEventListener('submit', async (e)
   document.getElementById('adjustStockModal').classList.remove('active');
 });
 
-// ── Add New Item Form (Page 1) ─────────────────────────────────────────────────
+// ── Add New Poultry Item Form (Page 1) ─────────────────────────────────────────
 document.getElementById('directAddItemForm')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const name  = document.getElementById('directItemName').value.trim();
   const stock = parseInt(document.getElementById('directItemStock').value, 10) || 0;
   if (!name) return;
 
-  const newObj = { name, stock_quantity: stock, min_alert_qty: 5, updated_at: new Date().toISOString() };
+  const newObj = { name, category: 'Poultry', stock_quantity: stock, min_alert_qty: 5, updated_at: new Date().toISOString() };
 
   if (isLiveSupabase && supabase) {
     try {
@@ -839,7 +917,7 @@ document.getElementById('directAddItemForm')?.addEventListener('submit', async (
         renderAll();
         highlightUpdatedRow(data.id);
       }
-      showToast(`Added "${name}" with ${stock} in stock!`, 'success');
+      showToast(`Added poultry item "${name}" with ${stock} in stock!`, 'success');
       playSuccessChime();
     } catch (err) {
       showToast('Error saving product: ' + err.message, 'danger');
@@ -851,13 +929,53 @@ document.getElementById('directAddItemForm')?.addEventListener('submit', async (
     saveDataToStorage();
     renderAll();
     highlightUpdatedRow(newObj.id);
-    showToast(`Added "${name}" with ${stock} in stock!`, 'success');
+    showToast(`Added poultry item "${name}" with ${stock} in stock!`, 'success');
     playSuccessChime();
   }
 
   document.getElementById('directItemName').value  = '';
   document.getElementById('directItemStock').value = '10';
   document.getElementById('directItemName').focus();
+});
+
+// ── Add New Pet Food Item Form (Page 2) ────────────────────────────────────────
+document.getElementById('directAddPetFoodForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name  = document.getElementById('directPetFoodName').value.trim();
+  const stock = parseInt(document.getElementById('directPetFoodStock').value, 10) || 0;
+  if (!name) return;
+
+  const newObj = { name, category: 'Pet Food', stock_quantity: stock, min_alert_qty: 5, updated_at: new Date().toISOString() };
+
+  if (isLiveSupabase && supabase) {
+    try {
+      const { data, error } = await supabase.from('products').insert(newObj).select().single();
+      if (error) throw error;
+      if (data && !products.some(p => p.id === data.id)) {
+        products.unshift(data);
+        saveDataToStorage();
+        renderAll();
+        highlightUpdatedRow(data.id);
+      }
+      showToast(`Added pet food item "${name}" with ${stock} in stock!`, 'success');
+      playSuccessChime();
+    } catch (err) {
+      showToast('Error saving pet food: ' + err.message, 'danger');
+      return;
+    }
+  } else {
+    newObj.id = 'prod-' + Date.now();
+    products.unshift(newObj);
+    saveDataToStorage();
+    renderAll();
+    highlightUpdatedRow(newObj.id);
+    showToast(`Added pet food item "${name}" with ${stock} in stock!`, 'success');
+    playSuccessChime();
+  }
+
+  document.getElementById('directPetFoodName').value  = '';
+  document.getElementById('directPetFoodStock').value = '10';
+  document.getElementById('directPetFoodName').focus();
 });
 
 // ── Delete Item ────────────────────────────────────────────────────────────────
@@ -885,27 +1003,39 @@ window.deleteItem = async (productId) => {
   }
 };
 
-// ── Search (Page 1) ────────────────────────────────────────────────────────────
-document.getElementById('inventorySearch')?.addEventListener('input', debounce(renderProducts, 100));
+// ── Searches (Poultry & Pet Food) ──────────────────────────────────────────────
+document.getElementById('inventorySearch')?.addEventListener('input', debounce(renderPoultryProducts, 100));
+document.getElementById('petFoodSearch')?.addEventListener('input', debounce(renderPetFoodProducts, 100));
 
 // ── Tab Navigation ─────────────────────────────────────────────────────────────
 function switchTab(tabId) {
-  currentActiveTab = tabId;
+  const normalizedTab = (tabId === 'inventory') ? 'poultry' : tabId;
+  currentActiveTab = normalizedTab;
+
   document.querySelectorAll('.desktop-nav .nav-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.getAttribute('data-tab') === tabId);
+    const btnTab = btn.getAttribute('data-tab');
+    const isMatch = btnTab === normalizedTab || (btnTab === 'inventory' && normalizedTab === 'poultry');
+    btn.classList.toggle('active', isMatch);
   });
   document.querySelectorAll('.mobile-nav-bar .mobile-nav-item').forEach(btn => {
-    btn.classList.toggle('active', btn.getAttribute('data-tab') === tabId);
+    const btnTab = btn.getAttribute('data-tab');
+    const isMatch = btnTab === normalizedTab || (btnTab === 'inventory' && normalizedTab === 'poultry');
+    btn.classList.toggle('active', isMatch);
   });
   document.querySelectorAll('.view-section').forEach(view => {
-    view.classList.toggle('active', view.id === `view-${tabId}`);
+    const isMatch = view.id === `view-${normalizedTab}` || (view.id === 'view-inventory' && normalizedTab === 'poultry');
+    view.classList.toggle('active', isMatch);
   });
-  if (tabId === 'inventory') {
-    renderProducts();
-  } else if (tabId === 'inout') {
+
+  renderMetrics();
+  if (normalizedTab === 'poultry') {
+    renderPoultryProducts();
+  } else if (normalizedTab === 'petfood') {
+    renderPetFoodProducts();
+  } else if (normalizedTab === 'inout') {
     renderInOutList();
     renderInOutActivity();
-  } else if (tabId === 'records') {
+  } else if (normalizedTab === 'records') {
     renderRecordsPage();
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -913,6 +1043,16 @@ function switchTab(tabId) {
 
 document.querySelectorAll('[data-tab]').forEach(btn => {
   btn.addEventListener('click', () => switchTab(btn.getAttribute('data-tab')));
+});
+
+// Records Filter Pills (All / Poultry / Pet Food)
+document.querySelectorAll('[data-invoice-filter]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-invoice-filter]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentInvoiceFilter = btn.getAttribute('data-invoice-filter') || 'ALL';
+    renderRecordsPage();
+  });
 });
 
 // ── Date Formatting Utility ───────────────────────────────────────────────────
@@ -947,6 +1087,7 @@ function getInvoiceRecords() {
     const key = inv ? `inv_${inv.toLowerCase()}` : `quick_${m.id}`;
     const displayNum = inv || 'Quick Dispatch (No #)';
     const cleanNote = cleanInvoiceNote(m.note, inv);
+    const itemIsPetFood = isPetFoodProduct(m.product_id, m.product_name);
 
     let rec = invoiceMap.get(key);
     if (!rec) {
@@ -959,9 +1100,18 @@ function getInvoiceRecords() {
         formatted_date: formatDateTime(m.created_at),
         note: cleanNote,
         items: [],
-        total_units: 0
+        total_units: 0,
+        hasPetFood: false,
+        hasPoultry: false,
+        isPetFoodInvoice: false
       };
       invoiceMap.set(key, rec);
+    }
+
+    if (itemIsPetFood) {
+      rec.hasPetFood = true;
+    } else {
+      rec.hasPoultry = true;
     }
 
     const qty = Number(m.quantity) || 0;
@@ -969,6 +1119,7 @@ function getInvoiceRecords() {
       product_id: m.product_id,
       product_name: m.product_name,
       quantity: qty,
+      isPetFood: itemIsPetFood,
       created_at: m.created_at
     });
     rec.total_units += qty;
@@ -981,7 +1132,13 @@ function getInvoiceRecords() {
     }
   }
 
-  cachedInvoiceRecords = Array.from(invoiceMap.values()).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  const list = Array.from(invoiceMap.values());
+  list.forEach(rec => {
+    // If invoice contains pet food items, classify as Pet Food invoice
+    rec.isPetFoodInvoice = rec.hasPetFood;
+  });
+
+  cachedInvoiceRecords = list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   return cachedInvoiceRecords;
 }
 
@@ -994,6 +1151,9 @@ function renderRecordsPage() {
   const totalInvoices = allRecords.filter(r => r.isCustomInvoice).length;
   const totalUnits = allRecords.reduce((sum, r) => sum + r.total_units, 0);
 
+  const poultryInvoices = allRecords.filter(r => !r.isPetFoodInvoice);
+  const petFoodInvoices = allRecords.filter(r => r.isPetFoodInvoice);
+
   const totInvEl = document.getElementById('recordsTotalInvoices');
   const totUnitsEl = document.getElementById('recordsTotalUnits');
   const actProdEl = document.getElementById('recordsActiveProducts');
@@ -1002,8 +1162,24 @@ function renderRecordsPage() {
   if (totUnitsEl) totUnitsEl.textContent = totalUnits;
   if (actProdEl) actProdEl.textContent = products.length;
 
+  // Update counts on filter pills
+  const cAll = document.getElementById('countInvAll');
+  const cPoultry = document.getElementById('countInvPoultry');
+  const cPet = document.getElementById('countInvPetFood');
+  if (cAll) cAll.textContent = allRecords.length;
+  if (cPoultry) cPoultry.textContent = poultryInvoices.length;
+  if (cPet) cPet.textContent = petFoodInvoices.length;
+
+  // Filter based on active category filter tab
+  let categoryFiltered = allRecords;
+  if (currentInvoiceFilter === 'POULTRY') {
+    categoryFiltered = poultryInvoices;
+  } else if (currentInvoiceFilter === 'PET_FOOD') {
+    categoryFiltered = petFoodInvoices;
+  }
+
   const query = (document.getElementById('recordsSearch')?.value || '').toLowerCase().trim();
-  const filtered = allRecords.filter(r => {
+  const filtered = categoryFiltered.filter(r => {
     if (!query) return true;
     if (r.invoice_number.toLowerCase().includes(query)) return true;
     if (r.note && r.note.toLowerCase().includes(query)) return true;
@@ -1012,26 +1188,33 @@ function renderRecordsPage() {
   });
 
   if (filtered.length === 0) {
+    const filterName = currentInvoiceFilter === 'PET_FOOD' ? 'pet food' : currentInvoiceFilter === 'POULTRY' ? 'poultry' : '';
     container.innerHTML = `
       <div style="text-align:center; padding:48px 20px; color:var(--text-secondary); animation:viewEnter 0.3s ease both;">
         <div style="font-size:2.8rem; margin-bottom:10px;">🧾</div>
-        <p style="font-size:1.1rem; font-weight:600; color:var(--text-primary);">No invoice records found</p>
+        <p style="font-size:1.1rem; font-weight:600; color:var(--text-primary);">No ${filterName} invoice records found</p>
         <p style="font-size:0.85rem; margin-top:4px;">Dispatches created with an Invoice Number will automatically appear here.</p>
       </div>`;
     return;
   }
 
   container.innerHTML = filtered.map(r => {
+    const isPet = r.isPetFoodInvoice;
+    const accentColor = isPet ? 'var(--accent-emerald)' : 'var(--accent-amber)';
+
     const itemsPreview = r.items
-      .map(i => `<span style="font-weight:600; color:var(--text-primary);">${escapeHtml(i.product_name)}</span>: <span style="font-family:var(--font-mono); color:var(--accent-amber); font-weight:700;">${i.quantity}</span>`)
+      .map(i => `<span style="font-weight:600; color:var(--text-primary);">${escapeHtml(i.product_name)}</span>: <span style="font-family:var(--font-mono); color:${accentColor}; font-weight:700;">${i.quantity}</span>`)
       .join('<span style="color:var(--text-muted); margin:0 6px;">•</span>');
 
     return `
-      <div class="record-row" data-invoice-key="${escapeHtml(r.key)}" onclick="window.openInvoiceDetails('${escapeHtml(r.key)}')" title="Click to view full invoice breakdown">
+      <div class="record-row ${isPet ? 'pet-food-row' : 'poultry-row'}" data-invoice-key="${escapeHtml(r.key)}" onclick="window.openInvoiceDetails('${escapeHtml(r.key)}')" title="Click to view full invoice breakdown">
         <div>
-          <span class="invoice-pill">
+          <span class="invoice-pill ${isPet ? 'pet-food-invoice' : 'poultry-invoice'}">
             <span>🧾</span>
             <span>${escapeHtml(r.invoice_number)}</span>
+            ${isPet 
+              ? `<span class="category-tag-pet">🐾 Pet Food</span>` 
+              : `<span class="category-tag-poultry">🐔 Poultry</span>`}
           </span>
           ${r.note && r.note !== '-' ? `<div style="font-size:0.78rem; color:var(--text-secondary); margin-top:4px;">📍 ${escapeHtml(r.note)}</div>` : ''}
         </div>
@@ -1041,7 +1224,7 @@ function renderRecordsPage() {
         </div>
         <div>
           <div style="font-size:0.88rem; margin-bottom:3px;">
-            <strong style="color:var(--accent-amber); font-family:var(--font-mono); font-size:1rem;">${r.total_units}</strong> units dispatched
+            <strong style="color:${accentColor}; font-family:var(--font-mono); font-size:1rem;">${r.total_units}</strong> units dispatched
             <span style="color:var(--text-muted); font-size:0.8rem;">(${r.items.length} item${r.items.length > 1 ? 's' : ''})</span>
           </div>
           <div style="font-size:0.78rem; line-height:1.4; color:var(--text-secondary);">
@@ -1077,6 +1260,7 @@ window.openInvoiceDetails = function(keyOrNum) {
     return;
   }
 
+  const isPet   = rec.isPetFoodInvoice;
   const titleEl = document.getElementById('invoiceDetailsTitle');
   const dateEl  = document.getElementById('invoiceDetailsDate');
   const noteBox = document.getElementById('invoiceDetailsNoteBox');
@@ -1084,8 +1268,10 @@ window.openInvoiceDetails = function(keyOrNum) {
   const tbody   = document.getElementById('invoiceDetailsTableBody');
   const totalEl = document.getElementById('invoiceDetailsTotalUnits');
 
-  if (titleEl) titleEl.textContent = `Invoice #${rec.invoice_number}`;
-  if (dateEl)  dateEl.textContent  = `Dispatched on ${formatDateTime(rec.created_at)}`;
+  if (titleEl) {
+    titleEl.innerHTML = `Invoice #${escapeHtml(rec.invoice_number)} ${isPet ? '<span class="category-tag-pet" style="font-size:0.75rem; vertical-align:middle; margin-left:6px;">🐾 Pet Food</span>' : '<span class="category-tag-poultry" style="font-size:0.75rem; vertical-align:middle; margin-left:6px;">🐔 Poultry</span>'}`;
+  }
+  if (dateEl) dateEl.textContent = `Dispatched on ${formatDateTime(rec.created_at)}`;
 
   if (rec.note && rec.note !== '-') {
     noteBox.style.display = 'block';
@@ -1094,14 +1280,20 @@ window.openInvoiceDetails = function(keyOrNum) {
     noteBox.style.display = 'none';
   }
 
+  if (totalEl) {
+    totalEl.textContent = rec.total_units;
+    totalEl.style.color = isPet ? 'var(--accent-emerald)' : 'var(--accent-amber)';
+  }
+
   tbody.innerHTML = rec.items.map(i => {
     const prod = products.find(p => String(p.id) === String(i.product_id) || p.name === i.product_name);
     const remainingStock = prod ? (Number(prod.stock_quantity) || 0) : '-';
+    const itemColor = (i.isPetFood || isPet) ? 'var(--accent-emerald)' : 'var(--accent-amber)';
 
     return `
       <tr>
         <td style="font-weight:700; color:var(--text-primary); font-size:0.95rem;">${escapeHtml(i.product_name)}</td>
-        <td style="text-align:center; font-family:var(--font-mono); font-weight:800; color:var(--accent-amber); font-size:1.05rem;">
+        <td style="text-align:center; font-family:var(--font-mono); font-weight:800; color:${itemColor}; font-size:1.05rem;">
           -${i.quantity}
         </td>
         <td style="text-align:right; font-family:var(--font-mono); font-weight:700; color:var(--text-secondary); font-size:0.92rem;">
@@ -1212,7 +1404,7 @@ document.getElementById('itemHistoryModal')?.addEventListener('click', (e) => {
 });
 
 // Event delegation for opening Item History and Invoice Details modals
-['inventoryList', 'inoutItemList'].forEach(containerId => {
+['inventoryList', 'petFoodList', 'inoutItemList'].forEach(containerId => {
   document.getElementById(containerId)?.addEventListener('click', (e) => {
     const btn = e.target.closest('.item-title-btn');
     if (btn) {
