@@ -6,7 +6,7 @@
 // ESC key closes any open modal
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  ['adjustStockModal', 'batchInOutModal'].forEach(id => {
+  ['adjustStockModal', 'batchInOutModal', 'invoiceDetailsModal', 'itemHistoryModal'].forEach(id => {
     document.getElementById(id)?.classList.remove('active');
   });
 });
@@ -28,31 +28,56 @@ const DEFAULT_MOVEMENTS = [
 ];
 
 // ── App State ──────────────────────────────────────────────────────────────────
-let supabase       = null;
-let isLiveSupabase = false;
-let products       = [];
-let movements      = [];
+let supabase         = null;
+let isLiveSupabase   = false;
+let products         = [];
+let movements        = [];
 let broadcastChannel = null;
+let currentActiveTab = 'inventory';
+
+// Memoized invoice records cache
+let cachedInvoiceRecords = null;
+function invalidateRecordsCache() {
+  cachedInvoiceRecords = null;
+}
 
 // Current batch modal mode: 'IN' | 'OUT'
 let batchMode = 'IN';
 
-// ── Audio & Haptic ─────────────────────────────────────────────────────────────
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+// ── Debounce Utility for fast responsive typing ───────────────────────────────
+function debounce(fn, delay = 100) {
+  let timer = null;
+  return function(...args) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+
+// ── Audio & Haptic (Lazy initialized on first user interaction) ────────────────
+let audioCtx = null;
+function getAudioContext() {
+  if (!audioCtx) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (AudioCtx) audioCtx = new AudioCtx();
+  }
+  return audioCtx;
+}
 
 function playBeep(freq = 880, duration = 0.08, type = 'sine') {
   try {
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    const osc  = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume();
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
     osc.type = type;
-    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-    gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
     osc.connect(gain);
-    gain.connect(audioCtx.destination);
+    gain.connect(ctx.destination);
     osc.start();
-    osc.stop(audioCtx.currentTime + duration);
+    osc.stop(ctx.currentTime + duration);
   } catch (_) {}
 }
 
@@ -135,10 +160,19 @@ async function initSupabaseClient() {
   }
 }
 
+const INVOICE_REGEX = /Invoice\s*#?([A-Za-z0-9\-_/]+)/i;
+const INVOICE_PREFIX_REGEX = /^Invoice\s*#?[^\s•]+(\s*•\s*)?/i;
+
 function parseInvoiceNumber(notes) {
   if (!notes) return null;
-  const match = notes.match(/Invoice\s*#?([A-Za-z0-9\-_/]+)/i);
+  const match = notes.match(INVOICE_REGEX);
   return match ? match[1].trim() : null;
+}
+
+function cleanInvoiceNote(note, inv) {
+  if (!note) return '-';
+  if (!inv) return note;
+  return note.replace(INVOICE_PREFIX_REGEX, '').trim() || '-';
 }
 
 async function fetchRemoteProducts() {
@@ -153,6 +187,7 @@ async function fetchRemoteMovements() {
     .from('transactions').select('*')
     .order('created_at', { ascending: false }).limit(1000);
   if (!error && data) {
+    invalidateRecordsCache();
     movements = data.map(tx => ({
       id:           tx.id,
       product_id:   tx.product_id,
@@ -163,8 +198,8 @@ async function fetchRemoteMovements() {
       note:         tx.notes || (tx.type === 'SHIPMENT_IN' ? 'Shipment Received' : 'Dispatched for Distribution'),
       created_at:   tx.created_at,
     }));
-    renderInOutActivity();
-    renderRecordsPage();
+    if (currentActiveTab === 'inout') renderInOutActivity();
+    if (currentActiveTab === 'records') renderRecordsPage();
   }
 }
 
@@ -186,6 +221,7 @@ function handleRemoteProductChange(payload) {
 
 function handleRemoteTransactionChange(payload) {
   if (payload.eventType === 'INSERT') {
+    invalidateRecordsCache();
     const tx = payload.new;
     movements.unshift({
       id:           tx.id,
@@ -197,8 +233,8 @@ function handleRemoteTransactionChange(payload) {
       note:         tx.notes || '',
       created_at:   tx.created_at,
     });
-    renderInOutActivity();
-    renderRecordsPage();
+    if (currentActiveTab === 'inout') renderInOutActivity();
+    if (currentActiveTab === 'records') renderRecordsPage();
   }
 }
 
@@ -214,6 +250,7 @@ function highlightUpdatedRow(productId) {
 
 // ── Storage Helpers ────────────────────────────────────────────────────────────
 function loadDataFromStorage() {
+  invalidateRecordsCache();
   const storedProd = localStorage.getItem('stockpulse_simple_products');
   const storedMov  = localStorage.getItem('stockpulse_simple_movements');
   products  = storedProd ? JSON.parse(storedProd) : [...DEFAULT_PRODUCTS];
@@ -222,18 +259,30 @@ function loadDataFromStorage() {
 }
 
 function saveDataToStorage() {
+  invalidateRecordsCache();
   localStorage.setItem('stockpulse_simple_products', JSON.stringify(products));
   localStorage.setItem('stockpulse_simple_movements', JSON.stringify(movements));
   broadcastChannel?.postMessage({ type: 'PRODUCT_UPDATE' });
 }
 
 // ── Render Functions ───────────────────────────────────────────────────────────
-function renderAll() {
+function renderAll(forceAll = false) {
   renderMetrics();
-  renderProducts();
-  renderInOutList();
-  renderInOutActivity();
-  renderRecordsPage();
+  if (forceAll) {
+    renderProducts();
+    renderInOutList();
+    renderInOutActivity();
+    renderRecordsPage();
+    return;
+  }
+  if (currentActiveTab === 'inventory') {
+    renderProducts();
+  } else if (currentActiveTab === 'inout') {
+    renderInOutList();
+    renderInOutActivity();
+  } else if (currentActiveTab === 'records') {
+    renderRecordsPage();
+  }
 }
 
 function renderMetrics() {
@@ -460,10 +509,8 @@ function renderBatchModalItems() {
   updateBatchTotalCount();
 }
 
-// Search filter in modal
-document.getElementById('batchModalSearch')?.addEventListener('input', () => {
-  renderBatchModalItems();
-});
+// Search filter in modal (debounced)
+document.getElementById('batchModalSearch')?.addEventListener('input', debounce(renderBatchModalItems, 100));
 
 // Called by +/- buttons
 window.batchChangeQty = (productId, delta) => {
@@ -839,10 +886,11 @@ window.deleteItem = async (productId) => {
 };
 
 // ── Search (Page 1) ────────────────────────────────────────────────────────────
-document.getElementById('inventorySearch')?.addEventListener('input', renderProducts);
+document.getElementById('inventorySearch')?.addEventListener('input', debounce(renderProducts, 100));
 
 // ── Tab Navigation ─────────────────────────────────────────────────────────────
 function switchTab(tabId) {
+  currentActiveTab = tabId;
   document.querySelectorAll('.desktop-nav .nav-btn').forEach(btn => {
     btn.classList.toggle('active', btn.getAttribute('data-tab') === tabId);
   });
@@ -852,7 +900,12 @@ function switchTab(tabId) {
   document.querySelectorAll('.view-section').forEach(view => {
     view.classList.toggle('active', view.id === `view-${tabId}`);
   });
-  if (tabId === 'records') {
+  if (tabId === 'inventory') {
+    renderProducts();
+  } else if (tabId === 'inout') {
+    renderInOutList();
+    renderInOutActivity();
+  } else if (tabId === 'records') {
     renderRecordsPage();
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -881,51 +934,55 @@ function formatDateTime(isoString) {
   }
 }
 
-// ── Records & Invoices Management ──────────────────────────────────────────────
+// ── Records & Invoices Management (Memoized) ──────────────────────────────────
 function getInvoiceRecords() {
+  if (cachedInvoiceRecords) return cachedInvoiceRecords;
+
   const invoiceMap = new Map();
 
-  movements.forEach(m => {
-    if (m.type !== 'OUT') return;
+  for (let idx = 0; idx < movements.length; idx++) {
+    const m = movements[idx];
+    if (m.type !== 'OUT') continue;
     const inv = m.invoice_number || parseInvoiceNumber(m.note);
     const key = inv ? `inv_${inv.toLowerCase()}` : `quick_${m.id}`;
     const displayNum = inv || 'Quick Dispatch (No #)';
+    const cleanNote = cleanInvoiceNote(m.note, inv);
 
-    let cleanNote = m.note || '';
-    if (inv) {
-      cleanNote = cleanNote.replace(new RegExp(`Invoice\\s*#?${inv}(\\s*•\\s*)?`, 'i'), '').trim();
-    }
-
-    if (!invoiceMap.has(key)) {
-      invoiceMap.set(key, {
+    let rec = invoiceMap.get(key);
+    if (!rec) {
+      rec = {
         key,
         invoice_number: displayNum,
         raw_invoice: inv,
         isCustomInvoice: !!inv,
         created_at: m.created_at,
+        formatted_date: formatDateTime(m.created_at),
         note: cleanNote,
         items: [],
         total_units: 0
-      });
+      };
+      invoiceMap.set(key, rec);
     }
 
-    const rec = invoiceMap.get(key);
+    const qty = Number(m.quantity) || 0;
     rec.items.push({
       product_id: m.product_id,
       product_name: m.product_name,
-      quantity: Number(m.quantity) || 0,
+      quantity: qty,
       created_at: m.created_at
     });
-    rec.total_units += Number(m.quantity) || 0;
+    rec.total_units += qty;
     if (new Date(m.created_at) > new Date(rec.created_at)) {
       rec.created_at = m.created_at;
+      rec.formatted_date = formatDateTime(m.created_at);
     }
-    if (!rec.note && cleanNote) {
+    if ((!rec.note || rec.note === '-') && cleanNote && cleanNote !== '-') {
       rec.note = cleanNote;
     }
-  });
+  }
 
-  return Array.from(invoiceMap.values()).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  cachedInvoiceRecords = Array.from(invoiceMap.values()).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  return cachedInvoiceRecords;
 }
 
 function renderRecordsPage() {
@@ -949,8 +1006,8 @@ function renderRecordsPage() {
   const filtered = allRecords.filter(r => {
     if (!query) return true;
     if (r.invoice_number.toLowerCase().includes(query)) return true;
-    if (r.note.toLowerCase().includes(query)) return true;
-    if (formatDateTime(r.created_at).toLowerCase().includes(query)) return true;
+    if (r.note && r.note.toLowerCase().includes(query)) return true;
+    if (r.formatted_date.toLowerCase().includes(query)) return true;
     return r.items.some(i => i.product_name.toLowerCase().includes(query));
   });
 
@@ -976,11 +1033,11 @@ function renderRecordsPage() {
             <span>🧾</span>
             <span>${escapeHtml(r.invoice_number)}</span>
           </span>
-          ${r.note ? `<div style="font-size:0.78rem; color:var(--text-secondary); margin-top:4px;">📍 ${escapeHtml(r.note)}</div>` : ''}
+          ${r.note && r.note !== '-' ? `<div style="font-size:0.78rem; color:var(--text-secondary); margin-top:4px;">📍 ${escapeHtml(r.note)}</div>` : ''}
         </div>
         <div style="color:var(--text-secondary); font-size:0.86rem; display:flex; align-items:center; gap:6px;">
           <span>📅</span>
-          <span>${formatDateTime(r.created_at)}</span>
+          <span>${r.formatted_date}</span>
         </div>
         <div>
           <div style="font-size:0.88rem; margin-bottom:3px;">
@@ -1000,8 +1057,8 @@ function renderRecordsPage() {
   }).join('');
 }
 
-// Search input listener for Records page
-document.getElementById('recordsSearch')?.addEventListener('input', renderRecordsPage);
+// Search input listener for Records page (debounced)
+document.getElementById('recordsSearch')?.addEventListener('input', debounce(renderRecordsPage, 100));
 
 // ── Invoice Details Modal ───────────────────────────────────────────────────────
 window.openInvoiceDetails = function(keyOrNum) {
@@ -1096,7 +1153,7 @@ window.openItemHistory = function(productId) {
     tbody.innerHTML = itemMovements.map(m => {
       const isIN = m.type === 'IN';
       const inv = m.invoice_number || parseInvoiceNumber(m.note);
-      const cleanNote = inv ? (m.note || '').replace(new RegExp(`Invoice\\s*#?${inv}(\\s*•\\s*)?`, 'i'), '').trim() : (m.note || '-');
+      const cleanNote = cleanInvoiceNote(m.note, inv);
 
       return `
         <tr>
