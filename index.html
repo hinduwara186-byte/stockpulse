@@ -479,11 +479,17 @@
 
           <input type="text" id="batchModalSearch" class="form-control" placeholder="🔍 Filter items in this list..." style="font-size:0.88rem;">
           
-          <!-- Invoice Number Input (Shown when Dispatching) -->
+          <!-- Invoice Number & Recipient Name Inputs (Shown when Dispatching) -->
           <div id="batchInvoiceField" style="display:none;">
-            <div style="position:relative;">
-              <input type="text" id="batchModalInvoice" class="form-control" placeholder="Enter Invoice Number (e.g. INV-10029, #501)" style="font-size:0.92rem; font-weight:700; color:var(--text-primary); border-color:rgba(245, 158, 11, 0.45); background:rgba(245, 158, 11, 0.08); padding-left:38px;">
-              <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:1.05rem; pointer-events:none;">🧾</span>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              <div style="position:relative;">
+                <input type="text" id="batchModalInvoice" class="form-control" placeholder="Enter Invoice Number (e.g. INV-10029, #501)" style="font-size:0.92rem; font-weight:700; color:var(--text-primary); border-color:rgba(245, 158, 11, 0.45); background:rgba(245, 158, 11, 0.08); padding-left:38px;">
+                <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:1.05rem; pointer-events:none;">🧾</span>
+              </div>
+              <div style="position:relative;">
+                <input type="text" id="batchModalCustomerName" class="form-control" placeholder="Enter Name (e.g. Customer, Store, Buyer)" style="font-size:0.88rem; color:var(--text-primary); border-color:rgba(255, 255, 255, 0.15); background:rgba(255, 255, 255, 0.04); padding-left:38px;">
+                <span style="position:absolute; left:12px; top:50%; transform:translateY(-50%); font-size:1.02rem; pointer-events:none;">👤</span>
+              </div>
             </div>
           </div>
 
@@ -519,7 +525,10 @@
               <span style="font-size:1.4rem;">🧾</span>
               <div class="modal-title" id="invoiceDetailsTitle">Invoice #</div>
             </div>
-            <div id="invoiceDetailsDate" style="font-size:0.8rem; color:var(--text-secondary); margin-top:4px;"></div>
+            <div id="invoiceDetailsCustomerBox" style="font-size:0.86rem; color:var(--text-secondary); margin-top:3px; display:none;">
+              <span>👤 Name: </span><span id="invoiceDetailsCustomerName" style="color:var(--text-primary); font-weight:600;"></span>
+            </div>
+            <div id="invoiceDetailsDate" style="font-size:0.8rem; color:var(--text-secondary); margin-top:3px;"></div>
           </div>
           <button class="modal-close" id="closeInvoiceDetailsModal">&times;</button>
         </div>

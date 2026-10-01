@@ -186,6 +186,7 @@ async function initSupabaseClient() {
 
 const INVOICE_REGEX = /Invoice\s*#?([A-Za-z0-9\-_/]+)/i;
 const INVOICE_PREFIX_REGEX = /^Invoice\s*#?[^\s•]+(\s*•\s*)?/i;
+const CUSTOMER_NAME_REGEX = /(?:Name|Customer|Buyer|Recipient):\s*([^•\n]+)/i;
 
 function parseInvoiceNumber(notes) {
   if (!notes) return null;
@@ -193,10 +194,22 @@ function parseInvoiceNumber(notes) {
   return match ? match[1].trim() : null;
 }
 
+function parseCustomerName(notes) {
+  if (!notes) return null;
+  const match = notes.match(CUSTOMER_NAME_REGEX);
+  return match ? match[1].trim() : null;
+}
+
 function cleanInvoiceNote(note, inv) {
   if (!note) return '-';
-  if (!inv) return note;
-  return note.replace(INVOICE_PREFIX_REGEX, '').trim() || '-';
+  let cleaned = note;
+  if (inv) {
+    cleaned = cleaned.replace(INVOICE_PREFIX_REGEX, '').trim();
+  }
+  // Strip out "Name: <name>" from general note
+  cleaned = cleaned.replace(/(?:^|\s*•\s*)(?:Name|Customer|Buyer|Recipient):\s*[^•\n]+/i, '').trim();
+  if (cleaned.startsWith('•')) cleaned = cleaned.replace(/^•\s*/, '').trim();
+  return cleaned || '-';
 }
 
 async function fetchRemoteProducts() {
@@ -233,8 +246,9 @@ async function fetchRemoteMovements() {
           type:         tx.type === 'SHIPMENT_IN' ? 'IN' : 'OUT',
           quantity:     tx.quantity,
           invoice_number: parseInvoiceNumber(tx.notes),
-          note:         tx.notes || (tx.type === 'SHIPMENT_IN' ? 'Shipment Received' : 'Dispatched for Distribution'),
-          created_at:   tx.created_at,
+          customer_name:  parseCustomerName(tx.notes),
+          note:           tx.notes || (tx.type === 'SHIPMENT_IN' ? 'Shipment Received' : 'Dispatched for Distribution'),
+          created_at:     tx.created_at,
         });
       }
     }
@@ -296,6 +310,7 @@ function handleRemoteTransactionChange(payload) {
 
     const txType = tx.type === 'SHIPMENT_IN' ? 'IN' : 'OUT';
     const txInv  = parseInvoiceNumber(tx.notes);
+    const txCust = parseCustomerName(tx.notes);
 
     // 2. Reconcile if matching a local optimistic placeholder
     const optIdx = movements.findIndex(m => {
@@ -314,6 +329,7 @@ function handleRemoteTransactionChange(payload) {
       movements[optIdx].created_at = tx.created_at;
       movements[optIdx].note = tx.notes || movements[optIdx].note;
       movements[optIdx].invoice_number = txInv || movements[optIdx].invoice_number;
+      movements[optIdx].customer_name = txCust || movements[optIdx].customer_name;
     } else {
       // Remote transaction arrived from another device
       movements.unshift({
@@ -323,6 +339,7 @@ function handleRemoteTransactionChange(payload) {
         type:         txType,
         quantity:     tx.quantity,
         invoice_number: txInv,
+        customer_name: txCust,
         note:         tx.notes || '',
         created_at:   tx.created_at,
       });
@@ -640,6 +657,8 @@ function openBatchModal(mode, explicitCategory = null) {
   }
   document.getElementById('batchModalNote').value = '';
   if (invoiceInput) invoiceInput.value = '';
+  const custInput = document.getElementById('batchModalCustomerName');
+  if (custInput) custInput.value = '';
 
   renderBatchModalItems();
   document.getElementById('batchInOutModal').classList.add('active');
@@ -800,13 +819,19 @@ document.getElementById('resetBatchInputsBtn')?.addEventListener('click', () => 
 document.getElementById('saveBatchUpdateBtn')?.addEventListener('click', async () => {
   const note = (document.getElementById('batchModalNote')?.value || '').trim();
   const invoiceVal = (document.getElementById('batchModalInvoice')?.value || '').trim();
+  const customerVal = (document.getElementById('batchModalCustomerName')?.value || '').trim();
 
   let noteText;
   if (batchMode === 'OUT') {
-    if (invoiceVal) {
-      noteText = `Invoice #${invoiceVal}${note ? ' • ' + note : ''}`;
+    const parts = [];
+    if (invoiceVal) parts.push(`Invoice #${invoiceVal}`);
+    if (customerVal) parts.push(`Name: ${customerVal}`);
+    if (note) parts.push(note);
+
+    if (parts.length > 0) {
+      noteText = parts.join(' • ');
     } else {
-      noteText = note || 'Dispatched for Distribution';
+      noteText = 'Dispatched for Distribution';
     }
   } else {
     noteText = note || 'Shipment Arrival';
@@ -858,6 +883,7 @@ document.getElementById('saveBatchUpdateBtn')?.addEventListener('click', async (
         type:         batchMode,
         quantity:     qty,
         invoice_number: batchMode === 'OUT' && invoiceVal ? invoiceVal : null,
+        customer_name:  batchMode === 'OUT' && customerVal ? customerVal : null,
         note:         noteText,
         created_at:   new Date().toISOString(),
       };
@@ -889,7 +915,7 @@ document.getElementById('saveBatchUpdateBtn')?.addEventListener('click', async (
     renderAll();
 
     const verb = batchMode === 'IN' ? 'Shipment saved' : 'Distribution recorded';
-    const invMsg = batchMode === 'OUT' && invoiceVal ? ` [Invoice #${invoiceVal}]` : '';
+    const invMsg = batchMode === 'OUT' && invoiceVal ? ` [Invoice #${invoiceVal}${customerVal ? ' • ' + customerVal : ''}]` : '';
     showToast(`${verb}${invMsg} — ${updates.length} item(s) updated!`, 'success');
     playSuccessChime();
     triggerHaptic();
@@ -898,6 +924,9 @@ document.getElementById('saveBatchUpdateBtn')?.addEventListener('click', async (
     batchValues.clear();
     if (document.getElementById('batchModalInvoice')) {
       document.getElementById('batchModalInvoice').value = '';
+    }
+    if (document.getElementById('batchModalCustomerName')) {
+      document.getElementById('batchModalCustomerName').value = '';
     }
     document.getElementById('batchInOutModal')?.classList.remove('active');
 
@@ -1260,6 +1289,7 @@ function getInvoiceRecords() {
     }
 
     const inv = m.invoice_number || parseInvoiceNumber(m.note);
+    const cust = m.customer_name || parseCustomerName(m.note);
     const key = inv ? `inv_${inv.toLowerCase()}` : `quick_${m.id}`;
     const displayNum = inv || 'Quick Dispatch (No #)';
     const cleanNote = cleanInvoiceNote(m.note, inv);
@@ -1271,6 +1301,7 @@ function getInvoiceRecords() {
         key,
         invoice_number: displayNum,
         raw_invoice: inv,
+        customer_name: cust,
         isCustomInvoice: !!inv,
         created_at: m.created_at,
         formatted_date: formatDateTime(m.created_at),
@@ -1282,6 +1313,9 @@ function getInvoiceRecords() {
         isPetFoodInvoice: false
       };
       invoiceMap.set(key, rec);
+    }
+    if (!rec.customer_name && cust) {
+      rec.customer_name = cust;
     }
 
     const qty = Number(m.quantity) || 0;
@@ -1379,6 +1413,7 @@ function renderRecordsPage() {
   const filtered = categoryFiltered.filter(r => {
     if (!query) return true;
     if (r.invoice_number.toLowerCase().includes(query)) return true;
+    if (r.customer_name && r.customer_name.toLowerCase().includes(query)) return true;
     if (r.note && r.note.toLowerCase().includes(query)) return true;
     if (r.formatted_date.toLowerCase().includes(query)) return true;
     return r.items.some(i => i.product_name.toLowerCase().includes(query));
@@ -1413,7 +1448,8 @@ function renderRecordsPage() {
               ? `<span class="category-tag-pet">🐾 Pet Food</span>` 
               : `<span class="category-tag-poultry">🐔 Poultry</span>`}
           </span>
-          ${r.note && r.note !== '-' ? `<div style="font-size:0.78rem; color:var(--text-secondary); margin-top:4px;">📍 ${escapeHtml(r.note)}</div>` : ''}
+          ${r.customer_name ? `<div style="font-size:0.83rem; font-weight:600; color:var(--text-secondary); margin-top:4px; display:flex; align-items:center; gap:5px;"><span>👤</span> <span>${escapeHtml(r.customer_name)}</span></div>` : ''}
+          ${r.note && r.note !== '-' ? `<div style="font-size:0.78rem; color:var(--text-secondary); margin-top:3px;">📍 ${escapeHtml(r.note)}</div>` : ''}
         </div>
         <div style="color:var(--text-secondary); font-size:0.86rem; display:flex; align-items:center; gap:6px;">
           <span>📅</span>
@@ -1468,6 +1504,16 @@ window.openInvoiceDetails = function(keyOrNum) {
   if (titleEl) {
     titleEl.innerHTML = `Invoice #${escapeHtml(rec.invoice_number)} ${isPet ? '<span class="category-tag-pet" style="font-size:0.75rem; vertical-align:middle; margin-left:6px;">🐾 Pet Food</span>' : '<span class="category-tag-poultry" style="font-size:0.75rem; vertical-align:middle; margin-left:6px;">🐔 Poultry</span>'}`;
   }
+
+  const custBox = document.getElementById('invoiceDetailsCustomerBox');
+  const custNameEl = document.getElementById('invoiceDetailsCustomerName');
+  if (rec.customer_name) {
+    if (custBox) custBox.style.display = 'block';
+    if (custNameEl) custNameEl.textContent = rec.customer_name;
+  } else {
+    if (custBox) custBox.style.display = 'none';
+  }
+
   if (dateEl) dateEl.textContent = `Dispatched on ${formatDateTime(rec.created_at)}`;
 
   if (rec.note && rec.note !== '-') {
@@ -1574,9 +1620,12 @@ window.openItemHistory = function(productId) {
           </td>
           <td>
             ${inv 
-              ? `<span class="invoice-pill" style="cursor:pointer;" onclick="event.stopPropagation(); window.openInvoiceDetails('${escapeHtml(inv)}')" title="Click to view full invoice breakdown">
-                  <span>🧾</span> ${escapeHtml(inv)}
-                 </span>`
+              ? `<div style="display:inline-flex; flex-direction:column; gap:3px;">
+                  <span class="invoice-pill" style="cursor:pointer;" onclick="event.stopPropagation(); window.openInvoiceDetails('${escapeHtml(inv)}')" title="Click to view full invoice breakdown">
+                    <span>🧾</span> ${escapeHtml(inv)}
+                  </span>
+                  ${m.customer_name || parseCustomerName(m.note) ? `<span style="font-size:0.75rem; color:var(--text-secondary); font-weight:600;">👤 ${escapeHtml(m.customer_name || parseCustomerName(m.note))}</span>` : ''}
+                 </div>`
               : `<span style="color:var(--text-muted); font-size:0.8rem;">—</span>`
             }
           </td>
